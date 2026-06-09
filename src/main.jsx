@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient } from '@supabase/supabase-js';
+import * as XLSX from 'xlsx';
 import './styles.css';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -102,6 +103,7 @@ function MainApp({ user, onLogout }) {
         <button className={tab==='mycalls'?'active':''} onClick={()=>setTab('mycalls')}>내 해피콜</button>
         {isAdmin && <button className={tab==='employees'?'active':''} onClick={()=>setTab('employees')}>직원관리</button>}
         {isAdmin && <button className={tab==='stores'?'active':''} onClick={()=>setTab('stores')}>매장관리</button>}
+        {isAdmin && <button className={tab==='rawupload'?'active':''} onClick={()=>setTab('rawupload')}>RAW 업로드</button>}
         {(isAdmin || isChecker) && <button className={tab==='allcalls'?'active':''} onClick={()=>setTab('allcalls')}>전체 해피콜</button>}
       </nav>
 
@@ -111,6 +113,7 @@ function MainApp({ user, onLogout }) {
         {tab === 'allcalls' && <CallList user={user} mode="all" />}
         {tab === 'employees' && <Employees />}
         {tab === 'stores' && <Stores />}
+        {tab === 'rawupload' && <RawUpload />}
       </main>
     </div>
   );
@@ -325,6 +328,153 @@ function Employees() {
           <td><select value={r.role||'직원'} onChange={e=>update(r.id,{role:e.target.value})}><option>직원</option><option>검수자</option><option>관리자</option></select></td>
         </tr>)}</tbody>
       </table>
+    </div>
+  );
+}
+
+
+function RawUpload() {
+  const [fileName, setFileName] = useState('');
+  const [summary, setSummary] = useState(null);
+  const [preview, setPreview] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  function excelDateToISO(value) {
+    if (!value) return null;
+    if (value instanceof Date && !isNaN(value)) return value.toISOString().slice(0, 10);
+    if (typeof value === 'number') {
+      const p = XLSX.SSF.parse_date_code(value);
+      if (!p) return null;
+      return `${p.y}-${String(p.m).padStart(2,'0')}-${String(p.d).padStart(2,'0')}`;
+    }
+    const text = String(value).trim().replace(/\./g,'-').replace(/\//g,'-');
+    const d = new Date(text);
+    return isNaN(d) ? null : d.toISOString().slice(0, 10);
+  }
+
+  function normalizeStoreName(value) {
+    const x = String(value || '').replace(/\s+/g,'').trim();
+    if (x.includes('금촌')) return '금촌';
+    if (x.includes('야당')) return '야당';
+    if (x.includes('봉일천')) return '봉일천';
+    if (x.includes('능곡')) return '능곡';
+    if (x.includes('화정')) return '화정';
+    if (x.includes('고양')) return '고양';
+    if (x.includes('합정')) return '합정';
+    if (x.includes('지축')) return '지축';
+    return String(value || '').trim();
+  }
+
+  function latestOnly(rows) {
+    const map = new Map();
+    rows.forEach(r => {
+      const old = map.get(r.join_no);
+      if (!old || String(r.open_date) > String(old.open_date)) map.set(r.join_no, r);
+    });
+    return Array.from(map.values());
+  }
+
+  async function handleFile(file) {
+    setBusy(true);
+    setSummary(null);
+    setPreview([]);
+    setFileName(file.name);
+
+    try {
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, { type: 'array', cellDates: true });
+      const sheets = wb.SheetNames.filter(s => /^20\d{2}$/.test(String(s).trim()));
+      const rawRows = [];
+
+      sheets.forEach(sheetName => {
+        const arr = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '' });
+        arr.forEach((r, idx) => {
+          const openDate = excelDateToISO(r[3]);       // D
+          const rawStore = String(r[7] || '').trim();  // H
+          const seller = String(r[9] || '').trim();    // J
+          const joinNo = String(r[26] || '').trim();   // AA
+          if (!openDate || !joinNo) return;
+
+          rawRows.push({
+            join_no: joinNo,
+            open_date: openDate,
+            store_name: normalizeStoreName(rawStore),
+            raw_store_name: rawStore,
+            seller_name: seller,
+            raw_sheet: String(sheetName),
+            raw_row: idx + 1
+          });
+        });
+      });
+
+      const latestRows = latestOnly(rawRows).sort((a,b)=>String(b.open_date).localeCompare(String(a.open_date)));
+      setSummary({
+        sheets: sheets.join(', '),
+        rawCount: rawRows.length,
+        latestCount: latestRows.length,
+        duplicateCount: rawRows.length - latestRows.length,
+        rows: latestRows
+      });
+      setPreview(latestRows.slice(0, 100));
+    } catch (e) {
+      alert('엑셀 분석 오류: ' + e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveCustomers() {
+    if (!summary?.rows?.length) return alert('먼저 엑셀을 분석해주세요.');
+    if (!confirm(`기존 customers 데이터를 삭제하고 최신 ${summary.rows.length}건으로 다시 저장할까요?`)) return;
+    setBusy(true);
+    try {
+      const { error: delErr } = await supabase.from('customers').delete().neq('join_no', '__never__');
+      if (delErr) throw delErr;
+
+      for (let i=0; i<summary.rows.length; i+=500) {
+        const chunk = summary.rows.slice(i, i+500);
+        const { error } = await supabase.from('customers').insert(chunk);
+        if (error) throw error;
+      }
+      alert(`저장 완료: ${summary.rows.length}건`);
+    } catch(e) {
+      alert('DB 저장 오류: ' + e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <h2>RAW 업로드</h2>
+      <div className="uploadBox">
+        <p className="muted">엑셀 파일 1개 안의 연도별 시트(2024, 2025, 2026...)를 자동으로 읽습니다.</p>
+        <p className="muted">기준 열: D=개통일자 / H=매장명 / J=담당자 / AA=가입번호</p>
+        <input type="file" accept=".xlsx,.xls" onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
+        {fileName && <p><b>선택 파일:</b> {fileName}</p>}
+        {busy && <p className="muted">처리 중...</p>}
+        {summary && (
+          <>
+            <div className="summaryGrid">
+              <Card title="인식 시트" value={summary.sheets || '-'} />
+              <Card title="전체 RAW" value={summary.rawCount} />
+              <Card title="최신 반영" value={summary.latestCount} />
+              <Card title="중복 제외" value={summary.duplicateCount} />
+            </div>
+            <button className="primary" onClick={saveCustomers} disabled={busy}>customers DB 저장</button>
+          </>
+        )}
+      </div>
+
+      {preview.length > 0 && (
+        <div>
+          <h3>미리보기 최신 100건</h3>
+          <table>
+            <thead><tr><th>가입번호</th><th>개통일</th><th>통합매장</th><th>RAW매장</th><th>담당자</th><th>시트</th><th>행</th></tr></thead>
+            <tbody>{preview.map((r,i)=><tr key={r.join_no + i}><td>{r.join_no}</td><td>{r.open_date}</td><td>{r.store_name}</td><td>{r.raw_store_name}</td><td>{r.seller_name}</td><td>{r.raw_sheet}</td><td>{r.raw_row}</td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

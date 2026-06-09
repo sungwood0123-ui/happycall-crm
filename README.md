@@ -1,4 +1,4 @@
-# 세찬 해피콜 관리시스템 V1
+# 세찬 해피콜 관리시스템 V2
 
 V1 기능:
 - 직원명 + 비밀번호 로그인
@@ -12,3 +12,11 @@ V1 기능:
 Vercel 환경변수:
 - VITE_SUPABASE_URL
 - VITE_SUPABASE_ANON_KEY
+
+
+## V2 추가 기능
+- RAW 업로드
+- 연도별 시트 자동 인식
+- D/H/J/AA열 추출
+- 가입번호 중복 시 최신 개통건만 반영
+- customers 테이블 저장
