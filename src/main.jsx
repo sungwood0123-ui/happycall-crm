@@ -297,490 +297,123 @@ function CallModal({ target, user, onClose, onSaved }) {
   );
 }
 
+
 function Employees() {
   const [rows, setRows] = useState([]);
+  const [storeOptions, setStoreOptions] = useState([]);
   const [form, setForm] = useState({ name:'', store_name:'금촌', status:'재직', password:'1234', role:'직원' });
+
   useEffect(() => { load(); }, []);
-  async function load() { const { data } = await supabase.from('employees').select('*').order('name'); setRows(data || []); }
+
+  async function load() {
+    const [{ data: empData, error: empError }, { data: storeData, error: storeError }] = await Promise.all([
+      supabase.from('employees').select('*').order('name'),
+      supabase.from('stores').select('*').order('name')
+    ]);
+
+    if (empError) alert(empError.message);
+    if (storeError) alert(storeError.message);
+
+    const stores = storeData || [];
+    setRows(empData || []);
+    setStoreOptions(stores);
+
+    if (stores.length && !stores.some(s => s.name === form.store_name)) {
+      setForm(prev => ({ ...prev, store_name: stores[0].name }));
+    }
+  }
+
   async function add() {
     if (!form.name.trim()) return alert('직원명을 입력해주세요.');
+    if (!form.store_name) return alert('매장을 선택해주세요.');
+
     const { error } = await supabase.from('employees').insert(form);
     if (error) return alert(error.message);
-    setForm({ name:'', store_name:'금촌', status:'재직', password:'1234', role:'직원' });
+
+    setForm({
+      name:'',
+      store_name: storeOptions[0]?.name || '금촌',
+      status:'재직',
+      password:'1234',
+      role:'직원'
+    });
     load();
   }
-  async function update(id, patch) { const { error } = await supabase.from('employees').update(patch).eq('id', id); if (error) alert(error.message); load(); }
+
+  async function update(id, patch) {
+    const { error } = await supabase.from('employees').update(patch).eq('id', id);
+    if (error) alert(error.message);
+    load();
+  }
+
+  const storeSelect = (value, onChange) => (
+    <select value={value || ''} onChange={e => onChange(e.target.value)}>
+      <option value="">매장 선택</option>
+      {storeOptions.map(s => (
+        <option key={s.id || s.name} value={s.name}>
+          {s.name}{s.status === '폐점' ? ' (폐점)' : ''}
+        </option>
+      ))}
+    </select>
+  );
+
   return (
     <div>
       <h2>직원관리</h2>
       <div className="formGrid">
         <input placeholder="직원명" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
-        <input placeholder="소속매장" value={form.store_name} onChange={e=>setForm({...form,store_name:e.target.value})} />
-        <select value={form.status} onChange={e=>setForm({...form,status:e.target.value})}><option>재직</option><option>퇴사</option><option>리스트 제외</option></select>
+        {storeSelect(form.store_name, v => setForm({...form,store_name:v}))}
+        <select value={form.status} onChange={e=>setForm({...form,status:e.target.value})}>
+          <option>재직</option>
+          <option>퇴사</option>
+          <option>리스트 제외</option>
+        </select>
         <input placeholder="비밀번호" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} />
-        <select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}><option>직원</option><option>검수자</option><option>관리자</option></select>
+        <select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>
+          <option>직원</option>
+          <option>검수자</option>
+          <option>관리자</option>
+        </select>
         <button className="primary" onClick={add}>직원 추가</button>
       </div>
-      <table><thead><tr><th>이름</th><th>매장</th><th>상태</th><th>비밀번호</th><th>권한</th></tr></thead>
-        <tbody>{rows.map(r => <tr key={r.id}>
-          <td>{r.name}</td>
-          <td><input value={r.store_name||''} onChange={e=>update(r.id,{store_name:e.target.value})} /></td>
-          <td><select value={r.status||'재직'} onChange={e=>update(r.id,{status:e.target.value})}><option>재직</option><option>퇴사</option><option>리스트 제외</option></select></td>
-          <td><input value={r.password||''} onChange={e=>update(r.id,{password:e.target.value})} /></td>
-          <td><select value={r.role||'직원'} onChange={e=>update(r.id,{role:e.target.value})}><option>직원</option><option>검수자</option><option>관리자</option></select></td>
-        </tr>)}</tbody>
+
+      <table>
+        <thead>
+          <tr>
+            <th>이름</th>
+            <th>매장</th>
+            <th>상태</th>
+            <th>비밀번호</th>
+            <th>권한</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.id}>
+              <td>{r.name}</td>
+              <td>{storeSelect(r.store_name, v => update(r.id,{store_name:v}))}</td>
+              <td>
+                <select value={r.status||'재직'} onChange={e=>update(r.id,{status:e.target.value})}>
+                  <option>재직</option>
+                  <option>퇴사</option>
+                  <option>리스트 제외</option>
+                </select>
+              </td>
+              <td><input value={r.password||''} onChange={e=>update(r.id,{password:e.target.value})} /></td>
+              <td>
+                <select value={r.role||'직원'} onChange={e=>update(r.id,{role:e.target.value})}>
+                  <option>직원</option>
+                  <option>검수자</option>
+                  <option>관리자</option>
+                </select>
+              </td>
+            </tr>
+          ))}
+        </tbody>
       </table>
-    </div>
-  );
-}
 
-
-
-function TargetGenerator() {
-  const todayISO = new Date().toISOString().slice(0, 10);
-  const [targetDate, setTargetDate] = useState(todayISO);
-  const [busy, setBusy] = useState(false);
-  const [summary, setSummary] = useState(null);
-  const [preview, setPreview] = useState([]);
-
-  function ymd(date) {
-    return date.toISOString().slice(0, 10);
-  }
-
-  function addDays(dateText, days) {
-    const d = new Date(dateText + 'T00:00:00');
-    d.setDate(d.getDate() + days);
-    return ymd(d);
-  }
-
-  function targetMonth(dateText) {
-    return dateText.slice(0, 7);
-  }
-
-  function dayOfMonth(dateText) {
-    return Number(dateText.slice(8, 10));
-  }
-
-  function normalizeName(v) {
-    return String(v || '').replace(/\s+/g, '').trim();
-  }
-
-  function normalizeStore(v) {
-    const x = String(v || '').replace(/\s+/g, '').trim();
-    if (x.includes('금촌')) return '금촌';
-    if (x.includes('야당')) return '야당';
-    if (x.includes('봉일천')) return '봉일천';
-    if (x.includes('능곡')) return '능곡';
-    if (x.includes('화정')) return '화정';
-    if (x.includes('고양')) return '고양';
-    if (x.includes('합정')) return '합정';
-    if (x.includes('지축')) return '지축';
-    return String(v || '').trim();
-  }
-
-  function getSuccessorStore(storeName, stores) {
-    const s = stores.find(x => normalizeStore(x.name) === normalizeStore(storeName));
-    if (s && s.status === '폐점' && s.successor_store) return normalizeStore(s.successor_store);
-    if (normalizeStore(storeName) === '합정') return '능곡';
-    if (normalizeStore(storeName) === '고양') return '화정';
-    if (normalizeStore(storeName) === '지축') return '임지하';
-    return normalizeStore(storeName);
-  }
-
-  function pickRoundRobin(storeName, staffByStore, counter) {
-    const list = staffByStore[storeName] || [];
-    if (!list.length) return null;
-    const idx = counter[storeName] || 0;
-    const picked = list[idx % list.length];
-    counter[storeName] = idx + 1;
-    return picked;
-  }
-
-  function decideAssignment(customer, employees, stores, historyMap, staffByStore, counter) {
-    const sellerKey = normalizeName(customer.seller_name);
-    const activeSeller = employees.find(e => normalizeName(e.name) === sellerKey && e.status === '재직');
-
-    if (activeSeller) {
-      return {
-        assigned_employee: activeSeller.name,
-        assigned_store: activeSeller.store_name,
-        reason: `최신 개통 담당자 ${activeSeller.name} 재직중으로 원담당자 배정`
-      };
-    }
-
-    const history = historyMap[customer.join_no];
-    if (history) {
-      const histActive = employees.find(e => normalizeName(e.name) === normalizeName(history.assigned_employee) && e.status === '재직');
-      if (histActive) {
-        return {
-          assigned_employee: histActive.name,
-          assigned_store: histActive.store_name,
-          reason: `기존 배정이력 유지: ${histActive.name}`
-        };
-      }
-    }
-
-    const manageStore = getSuccessorStore(customer.store_name, stores);
-    const picked = pickRoundRobin(manageStore, staffByStore, counter);
-
-    if (picked) {
-      return {
-        assigned_employee: picked.name,
-        assigned_store: picked.store_name,
-        reason: `원담당자 ${customer.seller_name || '-'} 미재직 / ${manageStore} 재직자 자동배정`
-      };
-    }
-
-    return {
-      assigned_employee: '',
-      assigned_store: manageStore,
-      reason: `${manageStore} 재직자 없음으로 배정불가`
-    };
-  }
-
-  async function generateTargets() {
-    setBusy(true);
-    setSummary(null);
-    setPreview([]);
-
-    try {
-      const [{data: customers, error: cErr}, {data: employees, error: eErr}, {data: stores, error: sErr}, {data: histories, error: hErr}] = await Promise.all([
-        supabase.from('customers').select('*'),
-        supabase.from('employees').select('*'),
-        supabase.from('stores').select('*'),
-        supabase.from('assignment_history').select('*')
-      ]);
-
-      if (cErr) throw cErr;
-      if (eErr) throw eErr;
-      if (sErr) throw sErr;
-      if (hErr) throw hErr;
-
-      const activeEmployees = (employees || []).filter(e => e.status === '재직');
-      const staffByStore = {};
-      activeEmployees.forEach(e => {
-        const st = normalizeStore(e.store_name);
-        if (!staffByStore[st]) staffByStore[st] = [];
-        staffByStore[st].push(e);
-      });
-      Object.keys(staffByStore).forEach(k => staffByStore[k].sort((a,b)=>String(a.name).localeCompare(String(b.name), 'ko')));
-
-      const historyMap = {};
-      (histories || []).forEach(h => historyMap[h.join_no] = h);
-
-      const plusMap = [
-        { days: 1, type: 'D_PLUS_1' },
-        { days: 7, type: 'D_PLUS_7' },
-        { days: 13, type: 'D_PLUS_13' },
-        { days: 95, type: 'D_PLUS_95' },
-        { days: 185, type: 'D_PLUS_185' }
-      ];
-
-      const targetMonthText = targetMonth(targetDate);
-      const targetDay = dayOfMonth(targetDate);
-
-      const rows = [];
-      const dPlusJoinNosThisMonth = new Set();
-
-      (customers || []).forEach(c => {
-        if (!c.open_date || !c.join_no) return;
-
-        plusMap.forEach(p => {
-          const plusDate = addDays(c.open_date, p.days);
-          if (targetMonth(plusDate) === targetMonthText) {
-            dPlusJoinNosThisMonth.add(c.join_no);
-          }
-          if (plusDate === targetDate) {
-            const a = decideAssignment(c, activeEmployees, stores || [], historyMap, staffByStore, {});
-            rows.push({
-              join_no: c.join_no,
-              customer_id: c.id,
-              target_date: targetDate,
-              target_month: targetMonthText,
-              call_type: p.type,
-              assigned_store: a.assigned_store,
-              assigned_employee: a.assigned_employee,
-              is_skipped: false,
-              skip_reason: a.reason
-            });
-          }
-        });
-      });
-
-      const counter = {};
-      (customers || []).forEach(c => {
-        if (!c.open_date || !c.join_no) return;
-        if (dayOfMonth(c.open_date) !== targetDay) return;
-        if (dPlusJoinNosThisMonth.has(c.join_no)) return;
-
-        const a = decideAssignment(c, activeEmployees, stores || [], historyMap, staffByStore, counter);
-        rows.push({
-          join_no: c.join_no,
-          customer_id: c.id,
-          target_date: targetDate,
-          target_month: targetMonthText,
-          call_type: 'MONTHLY_DAY',
-          assigned_store: a.assigned_store,
-          assigned_employee: a.assigned_employee,
-          is_skipped: false,
-          skip_reason: a.reason
-        });
-      });
-
-      const saveRows = rows.filter(r => r.assigned_employee);
-      setPreview(rows.slice(0, 150));
-      setSummary({
-        customerCount: customers?.length || 0,
-        generated: rows.length,
-        savable: saveRows.length,
-        unassigned: rows.length - saveRows.length,
-        dplusMonthCount: dPlusJoinNosThisMonth.size,
-        rows,
-        saveRows
-      });
-    } catch(e) {
-      alert('해피콜 생성 중 오류: ' + e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveTargets() {
-    if (!summary?.saveRows?.length) return alert('저장할 대상이 없습니다.');
-    if (!confirm(`${targetDate} 해피콜 대상 ${summary.saveRows.length}건을 저장할까요?\n기존 같은 날짜 대상은 삭제 후 다시 저장됩니다.`)) return;
-
-    setBusy(true);
-    try {
-      const { error: delErr } = await supabase.from('happycall_targets').delete().eq('target_date', targetDate);
-      if (delErr) throw delErr;
-
-      for (let i = 0; i < summary.saveRows.length; i += 500) {
-        const chunk = summary.saveRows.slice(i, i + 500);
-        const { error } = await supabase.from('happycall_targets').insert(chunk);
-        if (error) throw error;
-      }
-
-      const historyRows = summary.saveRows.map(r => ({
-        join_no: r.join_no,
-        assigned_store: r.assigned_store,
-        assigned_employee: r.assigned_employee,
-        assign_reason: r.skip_reason,
-        updated_at: new Date().toISOString()
-      }));
-
-      for (let i = 0; i < historyRows.length; i += 500) {
-        const chunk = historyRows.slice(i, i + 500);
-        const { error } = await supabase.from('assignment_history').upsert(chunk, { onConflict: 'join_no' });
-        if (error) throw error;
-      }
-
-      alert(`저장 완료: ${summary.saveRows.length}건`);
-    } catch(e) {
-      alert('DB 저장 오류: ' + e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div>
-      <h2>해피콜 생성</h2>
-      <div className="uploadBox">
-        <p className="muted">대상일 기준으로 D+1, D+7, D+13, D+95, D+185와 월간 정기 해피콜을 생성합니다.</p>
-        <p className="muted">당월 D+ 해피콜이 있는 고객은 해당 월의 월간 정기 해피콜에서 제외됩니다.</p>
-
-        <div className="formGrid compact">
-          <input type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} />
-          <button className="primary" onClick={generateTargets} disabled={busy}>대상 계산</button>
-          {summary && <button className="primary" onClick={saveTargets} disabled={busy}>해피콜 대상 DB 저장</button>}
-        </div>
-
-        {busy && <p className="muted">처리 중...</p>}
-
-        {summary && (
-          <div className="summaryGrid">
-            <Card title="전체 고객" value={summary.customerCount} />
-            <Card title="생성 대상" value={summary.generated} />
-            <Card title="저장 가능" value={summary.savable} />
-            <Card title="배정불가" value={summary.unassigned} />
-          </div>
-        )}
-      </div>
-
-      {preview.length > 0 && (
-        <div>
-          <h3>미리보기 최대 150건</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>가입번호</th>
-                <th>대상일</th>
-                <th>유형</th>
-                <th>배정매장</th>
-                <th>담당자</th>
-                <th>배정사유</th>
-              </tr>
-            </thead>
-            <tbody>
-              {preview.map((r, i) => (
-                <tr key={`${r.join_no}-${r.call_type}-${i}`}>
-                  <td>{r.join_no}</td>
-                  <td>{r.target_date}</td>
-                  <td>{callTypeLabel(r.call_type)}</td>
-                  <td>{r.assigned_store}</td>
-                  <td>{r.assigned_employee || '배정불가'}</td>
-                  <td>{r.skip_reason}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RawUpload() {
-  const [fileName, setFileName] = useState('');
-  const [summary, setSummary] = useState(null);
-  const [preview, setPreview] = useState([]);
-  const [busy, setBusy] = useState(false);
-
-  function excelDateToISO(value) {
-    if (!value) return null;
-    if (value instanceof Date && !isNaN(value)) return value.toISOString().slice(0, 10);
-    if (typeof value === 'number') {
-      const p = XLSX.SSF.parse_date_code(value);
-      if (!p) return null;
-      return `${p.y}-${String(p.m).padStart(2,'0')}-${String(p.d).padStart(2,'0')}`;
-    }
-    const text = String(value).trim().replace(/\./g,'-').replace(/\//g,'-');
-    const d = new Date(text);
-    return isNaN(d) ? null : d.toISOString().slice(0, 10);
-  }
-
-  function normalizeStoreName(value) {
-    const x = String(value || '').replace(/\s+/g,'').trim();
-    if (x.includes('금촌')) return '금촌';
-    if (x.includes('야당')) return '야당';
-    if (x.includes('봉일천')) return '봉일천';
-    if (x.includes('능곡')) return '능곡';
-    if (x.includes('화정')) return '화정';
-    if (x.includes('고양')) return '고양';
-    if (x.includes('합정')) return '합정';
-    if (x.includes('지축')) return '지축';
-    return String(value || '').trim();
-  }
-
-  function latestOnly(rows) {
-    const map = new Map();
-    rows.forEach(r => {
-      const old = map.get(r.join_no);
-      if (!old || String(r.open_date) > String(old.open_date)) map.set(r.join_no, r);
-    });
-    return Array.from(map.values());
-  }
-
-  async function handleFile(file) {
-    setBusy(true);
-    setSummary(null);
-    setPreview([]);
-    setFileName(file.name);
-
-    try {
-      const data = await file.arrayBuffer();
-      const wb = XLSX.read(data, { type: 'array', cellDates: true });
-      const sheets = wb.SheetNames.filter(s => /^20\d{2}$/.test(String(s).trim()));
-      const rawRows = [];
-
-      sheets.forEach(sheetName => {
-        const arr = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '' });
-        arr.forEach((r, idx) => {
-          const openDate = excelDateToISO(r[3]);       // D
-          const rawStore = String(r[7] || '').trim();  // H
-          const seller = String(r[9] || '').trim();    // J
-          const joinNo = String(r[26] || '').trim();   // AA
-          if (!openDate || !joinNo) return;
-
-          rawRows.push({
-            join_no: joinNo,
-            open_date: openDate,
-            store_name: normalizeStoreName(rawStore),
-            raw_store_name: rawStore,
-            seller_name: seller,
-            raw_sheet: String(sheetName),
-            raw_row: idx + 1
-          });
-        });
-      });
-
-      const latestRows = latestOnly(rawRows).sort((a,b)=>String(b.open_date).localeCompare(String(a.open_date)));
-      setSummary({
-        sheets: sheets.join(', '),
-        rawCount: rawRows.length,
-        latestCount: latestRows.length,
-        duplicateCount: rawRows.length - latestRows.length,
-        rows: latestRows
-      });
-      setPreview(latestRows.slice(0, 100));
-    } catch (e) {
-      alert('엑셀 분석 오류: ' + e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveCustomers() {
-    if (!summary?.rows?.length) return alert('먼저 엑셀을 분석해주세요.');
-    if (!confirm(`기존 customers 데이터를 삭제하고 최신 ${summary.rows.length}건으로 다시 저장할까요?`)) return;
-    setBusy(true);
-    try {
-      const { error: delErr } = await supabase.from('customers').delete().neq('join_no', '__never__');
-      if (delErr) throw delErr;
-
-      for (let i=0; i<summary.rows.length; i+=500) {
-        const chunk = summary.rows.slice(i, i+500);
-        const { error } = await supabase.from('customers').insert(chunk);
-        if (error) throw error;
-      }
-      alert(`저장 완료: ${summary.rows.length}건`);
-    } catch(e) {
-      alert('DB 저장 오류: ' + e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div>
-      <h2>RAW 업로드</h2>
-      <div className="uploadBox">
-        <p className="muted">엑셀 파일 1개 안의 연도별 시트(2024, 2025, 2026...)를 자동으로 읽습니다.</p>
-        <p className="muted">기준 열: D=개통일자 / H=매장명 / J=담당자 / AA=가입번호</p>
-        <input type="file" accept=".xlsx,.xls" onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
-        {fileName && <p><b>선택 파일:</b> {fileName}</p>}
-        {busy && <p className="muted">처리 중...</p>}
-        {summary && (
-          <>
-            <div className="summaryGrid">
-              <Card title="인식 시트" value={summary.sheets || '-'} />
-              <Card title="전체 RAW" value={summary.rawCount} />
-              <Card title="최신 반영" value={summary.latestCount} />
-              <Card title="중복 제외" value={summary.duplicateCount} />
-            </div>
-            <button className="primary" onClick={saveCustomers} disabled={busy}>customers DB 저장</button>
-          </>
-        )}
-      </div>
-
-      {preview.length > 0 && (
-        <div>
-          <h3>미리보기 최신 100건</h3>
-          <table>
-            <thead><tr><th>가입번호</th><th>개통일</th><th>통합매장</th><th>RAW매장</th><th>담당자</th><th>시트</th><th>행</th></tr></thead>
-            <tbody>{preview.map((r,i)=><tr key={r.join_no + i}><td>{r.join_no}</td><td>{r.open_date}</td><td>{r.store_name}</td><td>{r.raw_store_name}</td><td>{r.seller_name}</td><td>{r.raw_sheet}</td><td>{r.raw_row}</td></tr>)}</tbody>
-          </table>
-        </div>
+      {!storeOptions.length && (
+        <p className="error">매장 목록이 없습니다. 먼저 매장관리에서 매장을 등록해주세요.</p>
       )}
     </div>
   );
