@@ -127,3 +127,67 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .guideFocus li{
   margin-bottom:9px;
 }
+
+/* V11 menu and employee management */
+.topNav{
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.navGroup{
+  position:relative;
+  display:inline-block;
+}
+.navGroup > button{
+  height:100%;
+}
+.navDropdown{
+  display:none;
+  position:absolute;
+  top:100%;
+  left:0;
+  min-width:180px;
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:12px;
+  box-shadow:0 10px 25px rgba(0,0,0,.12);
+  padding:8px;
+  z-index:50;
+}
+.navGroup:hover .navDropdown,
+.navGroup:focus-within .navDropdown{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.navDropdown button{
+  text-align:left;
+  width:100%;
+  justify-content:flex-start;
+}
+.passwordEdit{
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+.passwordEdit input{
+  min-width:120px;
+}
+.passwordEdit button{
+  white-space:nowrap;
+}
+.smallText{
+  font-size:11px;
+  margin-top:4px;
+}
+@media (max-width:768px){
+  .topNav{
+    flex-wrap:wrap;
+    overflow:visible;
+  }
+  .navDropdown{
+    position:static;
+    box-shadow:none;
+    margin-top:6px;
+  }
+}

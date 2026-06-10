@@ -119,6 +119,7 @@ function Login({ onLogin }) {
     setErr('');
     const emp = employees.find(e => e.name === name);
     if (!emp) return setErr('직원을 선택해주세요.');
+    if (emp.status !== '재직') return setErr('퇴사 처리된 직원입니다. 관리자에게 문의하세요.');
     if ((emp.password || '') !== password) return setErr('비밀번호가 맞지 않습니다.');
     localStorage.setItem('happycall_user', JSON.stringify(emp));
     onLogin(emp);
@@ -201,21 +202,54 @@ function MainApp({ user, onLogout, onUserUpdate }) {
         <div className="headerActions"><button onClick={() => setShowPassword(true)}>비밀번호 변경</button><button onClick={onLogout}>로그아웃</button></div>
       </header>
 
-      <nav>
+      <nav className="topNav">
         {(isAdmin || isChecker || isManager) && <button className={tab==='dashboard'?'active':''} onClick={()=>setTab('dashboard')}>대시보드</button>}
         <button className={tab==='mycalls'?'active':''} onClick={()=>setTab('mycalls')}>내 해피콜</button>
+
+        {isManager && (
+          <div className="navGroup">
+            <button type="button">매장관리 ▾</button>
+            <div className="navDropdown">
+              <button className={tab==='manager'?'active':''} onClick={()=>setTab('manager')}>매장 해피콜 현황</button>
+              <button className={tab==='storecalls'?'active':''} onClick={()=>setTab('storecalls')}>매장 해피콜 리스트</button>
+              <button className={tab==='storePerformance'?'active':''} onClick={()=>setTab('storePerformance')}>직원별 현황</button>
+            </div>
+          </div>
+        )}
+
+        {isAdmin && (
+          <div className="navGroup">
+            <button type="button">관리 ▾</button>
+            <div className="navDropdown">
+              <button className={tab==='employees'?'active':''} onClick={()=>setTab('employees')}>직원관리</button>
+              <button className={tab==='stores'?'active':''} onClick={()=>setTab('stores')}>매장관리</button>
+              <button className={tab==='rawupload'?'active':''} onClick={()=>setTab('rawupload')}>RAW 업로드</button>
+              <button className={tab==='targetgen'?'active':''} onClick={()=>setTab('targetgen')}>해피콜 생성</button>
+            </div>
+          </div>
+        )}
+
+        {(isAdmin || isChecker) && (
+          <div className="navGroup">
+            <button type="button">검수/현황 ▾</button>
+            <div className="navDropdown">
+              <button className={tab==='review'?'active':''} onClick={()=>setTab('review')}>검수</button>
+              <button className={tab==='allcalls'?'active':''} onClick={()=>setTab('allcalls')}>전체 해피콜</button>
+              <button className={tab==='performance'?'active':''} onClick={()=>setTab('performance')}>직원별 현황</button>
+            </div>
+          </div>
+        )}
+
+        {isAdmin && (
+          <div className="navGroup">
+            <button type="button">기록 ▾</button>
+            <div className="navDropdown">
+              <button className={tab==='audit'?'active':''} onClick={()=>setTab('audit')}>감사로그</button>
+            </div>
+          </div>
+        )}
+
         <button className={tab==='guide'?'active':''} onClick={()=>setTab('guide')}>사용방법</button>
-        {isManager && <button className={tab==='manager'?'active':''} onClick={()=>setTab('manager')}>매장 해피콜 현황</button>}
-        {isManager && <button className={tab==='storecalls'?'active':''} onClick={()=>setTab('storecalls')}>매장 해피콜 현황</button>}
-        {isManager && <button className={tab==='storePerformance'?'active':''} onClick={()=>setTab('storePerformance')}>직원별 현황</button>}
-        {isAdmin && <button className={tab==='employees'?'active':''} onClick={()=>setTab('employees')}>직원관리</button>}
-        {isAdmin && <button className={tab==='stores'?'active':''} onClick={()=>setTab('stores')}>매장관리</button>}
-        {isAdmin && <button className={tab==='rawupload'?'active':''} onClick={()=>setTab('rawupload')}>RAW 업로드</button>}
-        {isAdmin && <button className={tab==='targetgen'?'active':''} onClick={()=>setTab('targetgen')}>해피콜 생성</button>}
-        {(isAdmin || isChecker) && <button className={tab==='review'?'active':''} onClick={()=>setTab('review')}>검수</button>}
-        {(isAdmin || isChecker) && <button className={tab==='allcalls'?'active':''} onClick={()=>setTab('allcalls')}>전체 해피콜</button>}
-        {(isAdmin || isChecker) && <button className={tab==='performance'?'active':''} onClick={()=>setTab('performance')}>직원별 현황</button>}
-        {isAdmin && <button className={tab==='audit'?'active':''} onClick={()=>setTab('audit')}>감사로그</button>}
       </nav>
 
       <main>
@@ -707,8 +741,10 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
 function Employees({ user }) {
   const [rows, setRows] = useState([]);
   const [storeOptions, setStoreOptions] = useState([]);
-  const [form, setForm] = useState({ name:'', store_name:'금촌', status:'재직', password:'1234', role:'직원' });
-  const [passwordDrafts, setPasswordDrafts] = useState({});
+  const [form, setForm] = useState({ name:'', store_name:'금촌', status:'재직', password:'1234', role:'직원', hire_date:'', resign_date:'' });
+  const [viewStatus, setViewStatus] = useState('재직');
+  const [drafts, setDrafts] = useState({});
+  const [historyTarget, setHistoryTarget] = useState(null);
 
   useEffect(() => { load(); }, []);
 
@@ -725,51 +761,75 @@ function Employees({ user }) {
     setRows(empData || []);
     setStoreOptions(stores);
 
+    const nextDrafts = {};
+    (empData || []).forEach(r => {
+      nextDrafts[r.id] = {
+        store_name: r.store_name || '',
+        status: r.status || '재직',
+        role: r.role || '직원',
+        hire_date: r.hire_date || '',
+        resign_date: r.resign_date || '',
+        password: ''
+      };
+    });
+    setDrafts(nextDrafts);
+
     if (stores.length && !stores.some(s => s.name === form.store_name)) {
       setForm(prev => ({ ...prev, store_name: stores[0].name }));
     }
+  }
+
+  function setDraft(id, patch) {
+    setDrafts(prev => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
   }
 
   async function add() {
     if (!form.name.trim()) return alert('직원명을 입력해주세요.');
     if (!form.store_name) return alert('매장을 선택해주세요.');
 
-    const { error } = await supabase.from('employees').insert(form);
+    const payload = {
+      name: form.name,
+      store_name: form.store_name,
+      status: form.status,
+      password: form.password || '1234',
+      role: form.role,
+      hire_date: form.hire_date || null,
+      resign_date: form.status === '퇴사' ? (form.resign_date || null) : null
+    };
+
+    const { error } = await supabase.from('employees').insert(payload);
     if (error) return alert(error.message);
+
     await writeAuditLog('직원추가', 'employee', form.name, user, `${form.name} / ${form.store_name} / ${form.role}`);
-
-    setForm({
-      name:'',
-      store_name: storeOptions[0]?.name || '금촌',
-      status:'재직',
-      password:'1234',
-      role:'직원'
-    });
+    setForm({ name:'', store_name: storeOptions[0]?.name || '금촌', status:'재직', password:'1234', role:'직원', hire_date:'', resign_date:'' });
     load();
   }
 
-  async function update(id, patch) {
-    const { error } = await supabase.from('employees').update(patch).eq('id', id);
-    if (error) alert(error.message);
-    else await writeAuditLog('직원수정', 'employee', id, user, formatAuditPatch(patch));
-    load();
-  }
+  async function saveEmployee(employee) {
+    const d = drafts[employee.id] || {};
+    const patch = {
+      store_name: d.store_name || employee.store_name || '',
+      status: d.status || employee.status || '재직',
+      role: d.role || employee.role || '직원',
+      hire_date: d.hire_date || null,
+      resign_date: (d.status || employee.status) === '퇴사' ? (d.resign_date || employee.resign_date || todayLocalISO()) : null
+    };
 
-  async function savePassword(employee) {
-    const nextPassword = passwordDrafts[employee.id];
-    if (!nextPassword) return alert('변경할 비밀번호를 입력해주세요.');
-    if (!confirm(`${employee.name} 직원의 비밀번호를 변경 저장할까요?`)) return;
+    if (d.password) patch.password = d.password;
 
-    const { error } = await supabase.from('employees').update({ password: nextPassword }).eq('id', employee.id);
+    if (patch.status === '퇴사' && !patch.resign_date) {
+      return alert('퇴사자는 퇴사일을 입력해주세요.');
+    }
+
+    if (!confirm(`${employee.name} 직원 정보를 최종 저장할까요?`)) return;
+
+    const { error } = await supabase.from('employees').update(patch).eq('id', employee.id);
     if (error) return alert(error.message);
 
-    await writeAuditLog('비밀번호변경', 'employee', employee.id, user, `대상: ${employee.name} / 비밀번호 변경됨`);
-    setPasswordDrafts(prev => {
-      const copy = { ...prev };
-      delete copy[employee.id];
-      return copy;
-    });
-    alert(`${employee.name} 비밀번호가 변경 저장되었습니다.`);
+    const detailParts = [formatAuditPatch(patch)];
+    if (d.password) detailParts.push('비밀번호: 변경됨');
+    await writeAuditLog('직원최종저장', 'employee', employee.id, user, `대상: ${employee.name} / ${detailParts.join(' / ')}`);
+    alert(`${employee.name} 직원 정보가 저장되었습니다.`);
     load();
   }
 
@@ -784,9 +844,19 @@ function Employees({ user }) {
     </select>
   );
 
+  const filteredRows = rows.filter(r => (r.status || '재직') === viewStatus);
+  const activeCount = rows.filter(r => (r.status || '재직') === '재직').length;
+  const retiredCount = rows.filter(r => r.status === '퇴사').length;
+
   return (
     <div>
       <h2>직원관리</h2>
+
+      <div className="filterBar">
+        <button className={viewStatus==='재직'?'active':''} onClick={()=>setViewStatus('재직')}>재직중 {activeCount}</button>
+        <button className={viewStatus==='퇴사'?'active':''} onClick={()=>setViewStatus('퇴사')}>퇴사자 {retiredCount}</button>
+      </div>
+
       <div className="formGrid">
         <input placeholder="직원명" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
         {storeSelect(form.store_name, v => setForm({...form,store_name:v}))}
@@ -795,13 +865,15 @@ function Employees({ user }) {
           <option>퇴사</option>
           <option>리스트 제외</option>
         </select>
-        <input placeholder="비밀번호" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} />
         <select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>
           <option>직원</option>
           <option>점장</option>
           <option>검수자</option>
           <option>관리자</option>
         </select>
+        <input type="date" value={form.hire_date || ''} onChange={e=>setForm({...form,hire_date:e.target.value})} />
+        <input type="date" value={form.resign_date || ''} onChange={e=>setForm({...form,resign_date:e.target.value})} />
+        <input placeholder="초기 비밀번호" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} />
         <button className="primary" onClick={add}>직원 추가</button>
       </div>
 
@@ -811,188 +883,164 @@ function Employees({ user }) {
             <th>이름</th>
             <th>매장</th>
             <th>상태</th>
-            <th>비밀번호</th>
-            <th>권한</th><th>초기화</th>
+            <th>권한</th>
+            <th>입사일</th>
+            <th>퇴사일</th>
+            <th>비밀번호 관리</th>
+            <th>근무이력</th>
+            <th>최종저장</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map(r => (
-            <tr key={r.id}>
-              <td>{r.name}</td>
-              <td>{storeSelect(r.store_name, v => update(r.id,{store_name:v}))}</td>
-              <td>
-                <select value={r.status||'재직'} onChange={e=>update(r.id,{status:e.target.value})}>
-                  <option>재직</option>
-                  <option>퇴사</option>
-                  <option>리스트 제외</option>
-                </select>
-              </td>
-              <td>
-                <div className="passwordEdit">
-                  <input
-                    value={passwordDrafts[r.id] ?? ''}
-                    onChange={e=>setPasswordDrafts(prev => ({ ...prev, [r.id]: e.target.value }))}
-                    placeholder="새 비밀번호"
-                  />
-                  <button onClick={() => savePassword(r)}>변경 저장</button>
-                </div>
-                <p className="muted smallText">현재값은 보안상 표시하지 않음</p>
-              </td>
-              <td>
-                <select value={r.role||'직원'} onChange={e=>update(r.id,{role:e.target.value})}>
-                  <option>직원</option>
-                  <option>점장</option>
-                  <option>검수자</option>
-                  <option>관리자</option>
-                </select>
-              </td>
-              <td><button onClick={async () => { if(confirm(`${r.name} 비밀번호를 1234로 초기화할까요?`)) { const { error } = await supabase.from('employees').update({password:'1234'}).eq('id', r.id); if (error) alert(error.message); else { await writeAuditLog('비밀번호초기화', 'employee', r.id, user, `대상: ${r.name} / 1234 초기화`); load(); } } }}>1234 초기화</button></td>
-            </tr>
-          ))}
+          {filteredRows.map(r => {
+            const d = drafts[r.id] || {};
+            const isRetired = (d.status || r.status) === '퇴사';
+            return (
+              <tr key={r.id}>
+                <td>{r.name}</td>
+                <td>{storeSelect(d.store_name ?? r.store_name, v => setDraft(r.id,{store_name:v}))}</td>
+                <td>
+                  <select value={d.status ?? r.status ?? '재직'} onChange={e=>setDraft(r.id,{status:e.target.value, resign_date:e.target.value === '퇴사' ? (d.resign_date || todayLocalISO()) : ''})}>
+                    <option>재직</option>
+                    <option>퇴사</option>
+                    <option>리스트 제외</option>
+                  </select>
+                </td>
+                <td>
+                  <select value={d.role ?? r.role ?? '직원'} onChange={e=>setDraft(r.id,{role:e.target.value})}>
+                    <option>직원</option>
+                    <option>점장</option>
+                    <option>검수자</option>
+                    <option>관리자</option>
+                  </select>
+                </td>
+                <td><input type="date" value={d.hire_date ?? r.hire_date ?? ''} onChange={e=>setDraft(r.id,{hire_date:e.target.value})} /></td>
+                <td><input type="date" value={d.resign_date ?? r.resign_date ?? ''} onChange={e=>setDraft(r.id,{resign_date:e.target.value})} disabled={!isRetired} /></td>
+                <td>
+                  <div className="passwordEdit">
+                    <input value={d.password ?? ''} onChange={e=>setDraft(r.id,{password:e.target.value})} placeholder="새 비밀번호" disabled={r.status === '퇴사'} />
+                    <button onClick={()=>setDraft(r.id,{password:'1234'})} disabled={r.status === '퇴사'}>1234 입력</button>
+                  </div>
+                  <p className="muted smallText">현재값은 보안상 표시하지 않음</p>
+                </td>
+                <td><button onClick={()=>setHistoryTarget(r)}>근무이력</button></td>
+                <td><button className="primary" onClick={()=>saveEmployee(r)}>최종저장</button></td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
 
-      <p className="muted">관리자 계정은 매장을 '관리자'로 선택하면 매장별 해피콜 자동배정 대상에서 제외됩니다.</p>
-      {storeOptions.length <= 1 && (
-        <p className="error">운영 매장 목록이 없습니다. 먼저 매장관리에서 매장을 등록해주세요.</p>
-      )}
+      <p className="muted">퇴사자는 로그인할 수 없습니다. 퇴사자 정보는 이력 확인용으로만 관리합니다.</p>
+      {storeOptions.length <= 1 && <p className="error">운영 매장 목록이 없습니다. 먼저 매장관리에서 매장을 등록해주세요.</p>}
+      {historyTarget && <WorkHistoryModal employee={historyTarget} stores={storeOptions} user={user} onClose={()=>setHistoryTarget(null)} />}
     </div>
   );
 }
 
+function WorkHistoryModal({ employee, stores, user, onClose }) {
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState({ store_name: employee.store_name || '', role: employee.role || '직원', start_date: '', end_date: '' });
+  const [busy, setBusy] = useState(false);
 
-
-
-function AuditLogsViewer() {
-  const [logs, setLogs] = useState([]);
-
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [employee.id]);
 
   async function load() {
+    const { data, error } = await supabase
+      .from('employee_store_history')
+      .select('*')
+      .eq('employee_id', employee.id)
+      .order('start_date', { ascending: false });
+
+    if (error) alert('근무이력 조회 오류: ' + error.message);
+    setRows(data || []);
+  }
+
+  async function addHistory() {
+    if (!form.store_name) return alert('매장을 선택해주세요.');
+    if (!form.role) return alert('직책을 선택해주세요.');
+    if (!form.start_date) return alert('시작일을 입력해주세요.');
+
+    setBusy(true);
     try {
-      const rows = await fetchAllRows('audit_logs', '*', 'created_at');
-      setLogs((rows || []).sort((a,b)=>String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 300));
+      const payload = {
+        employee_id: employee.id,
+        employee_name: employee.name,
+        store_name: form.store_name,
+        role: form.role,
+        start_date: form.start_date,
+        end_date: form.end_date || null
+      };
+
+      const { error } = await supabase.from('employee_store_history').insert(payload);
+      if (error) throw error;
+
+      await writeAuditLog('근무이력추가', 'employee_store_history', employee.id, user, `${employee.name} / ${form.store_name} / ${form.role} / ${form.start_date} ~ ${form.end_date || '현재'}`);
+      setForm({ store_name: employee.store_name || '', role: employee.role || '직원', start_date: '', end_date: '' });
+      load();
     } catch (e) {
-      alert('감사로그 조회 오류: ' + e.message);
+      alert('근무이력 저장 오류: ' + e.message);
+    } finally {
+      setBusy(false);
     }
   }
 
-  return (
-    <div>
-      <h2>감사로그</h2>
-      <div className="sectionCard">
-        <table>
-          <thead>
-            <tr><th>일시</th><th>작업자</th><th>작업</th><th>상세</th></tr>
-          </thead>
-          <tbody>
-            {logs.map(l => (
-              <tr key={l.id}>
-                <td>{String(l.created_at || '').slice(0, 19).replace('T', ' ')}</td>
-                <td>{l.actor_name}</td>
-                <td>{l.action}</td>
-                <td>{l.detail || `${l.target_type || ''} ${l.target_id || ''}`}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+  async function deleteHistory(row) {
+    if (!confirm('이 근무이력을 삭제할까요?')) return;
 
-function EmployeePerformanceDashboard({ user, mode = 'all' }) {
-  const [targets, setTargets] = useState([]);
-  const [logs, setLogs] = useState([]);
+    const { error } = await supabase.from('employee_store_history').delete().eq('id', row.id);
+    if (error) return alert(error.message);
 
-  useEffect(() => { load(); }, [mode]);
-
-  async function load() {
-    try {
-      const allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
-      const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
-
-      let visible = (allTargets || []).filter(t => !t.is_skipped);
-      if (mode === 'store') visible = visible.filter(t => t.assigned_store === user.store_name);
-
-      setTargets(visible);
-      setLogs(allLogs || []);
-    } catch (e) {
-      alert('직원별 현황 조회 오류: ' + e.message);
-    }
+    await writeAuditLog('근무이력삭제', 'employee_store_history', row.id, user, `${employee.name} / ${row.store_name} / ${row.role} / ${row.start_date} ~ ${row.end_date || '현재'}`);
+    load();
   }
 
-  const latestLogByTarget = useMemo(() => {
-    const map = {};
-    logs.forEach(l => {
-      const prev = map[l.target_id];
-      if (!prev || String(l.checked_at || '') > String(prev.checked_at || '')) map[l.target_id] = l;
-    });
-    return map;
-  }, [logs]);
-
-  const rows = useMemo(() => {
-    const map = {};
-    targets.forEach(t => {
-      const name = t.assigned_employee || '미지정';
-      if (!map[name]) map[name] = { name, store: t.assigned_store || '', total: 0, done: 0, pending: 0, todayTotal: 0, todayDone: 0, overdue: 0, rejected: 0, reviewPending: 0, reviewDone: 0, voc: 0 };
-      const r = map[name];
-      const log = latestLogByTarget[t.id];
-      r.total += 1;
-      if (t.target_date === todayLocalISO()) {
-        r.todayTotal += 1;
-        if (log) r.todayDone += 1;
-      }
-      if (log) {
-        r.done += 1;
-        if ((log.review_status || '검수대기') === '검수대기') r.reviewPending += 1;
-        if (log.review_status === '검수완료') r.reviewDone += 1;
-        if (log.review_status === '반려') r.rejected += 1;
-        if (log.call_detail === '불만사항있음') r.voc += 1;
-      } else {
-        r.pending += 1;
-        if (diffDays(t.target_date) > 0) r.overdue += 1;
-      }
-    });
-    return Object.values(map).sort((a,b) => {
-      if (b.overdue !== a.overdue) return b.overdue - a.overdue;
-      if (b.pending !== a.pending) return b.pending - a.pending;
-      return String(a.name).localeCompare(String(b.name), 'ko');
-    });
-  }, [targets, latestLogByTarget]);
-
-  const total = rows.reduce((a,r)=>({
-    total: a.total + r.total, done: a.done + r.done, pending: a.pending + r.pending, overdue: a.overdue + r.overdue, rejected: a.rejected + r.rejected
-  }), { total:0, done:0, pending:0, overdue:0, rejected:0 });
-
   return (
-    <div>
-      <h2>{mode === 'store' ? `${user.store_name} 직원별 해피콜 현황` : '직원별 해피콜 현황'}</h2>
-      <div className="stats">
-        <Card title="전체 대상" value={total.total} />
-        <Card title="전체 완료율" value={`${total.total ? Math.round(total.done / total.total * 1000) / 10 : 0}%`} />
-        <Card title="경과 미완료" value={total.overdue} />
-        <Card title="반려" value={total.rejected} />
-      </div>
-      <div className="sectionCard">
-        <table>
-          <thead><tr><th>담당자</th><th>매장</th><th>전체</th><th>완료</th><th>완료율</th><th>오늘 작업</th><th>오늘 완료율</th><th>미완료</th><th>경과</th><th>검수대기</th><th>검수완료</th><th>반려</th><th>VOC</th></tr></thead>
-          <tbody>
-            {rows.map(r => (
-              <tr key={r.name}>
-                <td>{r.name}</td><td>{r.store}</td><td>{r.total}</td><td>{r.done}</td>
-                <td>{r.total ? Math.round(r.done/r.total*1000)/10 : 0}%</td>
-                <td>{r.todayTotal}</td><td>{r.todayTotal ? Math.round(r.todayDone/r.todayTotal*1000)/10 : 0}%</td>
-                <td>{r.pending}</td><td>{r.overdue}</td><td>{r.reviewPending}</td><td>{r.reviewDone}</td><td>{r.rejected}</td><td>{r.voc}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className="modalBg">
+      <div className="modal">
+        <div className="modalHead"><h2>{employee.name} 근무이력</h2><button onClick={onClose}>닫기</button></div>
+
+        <section>
+          <h3>이력 추가</h3>
+          <div className="formGrid compact">
+            <select value={form.store_name} onChange={e=>setForm({...form,store_name:e.target.value})}>
+              <option value="">매장 선택</option>
+              {stores.filter(s => s.name !== '관리자').map(s => <option key={s.id || s.name} value={s.name}>{s.name}</option>)}
+            </select>
+            <select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>
+              <option>직원</option>
+              <option>점장</option>
+              <option>검수자</option>
+              <option>관리자</option>
+            </select>
+            <input type="date" value={form.start_date} onChange={e=>setForm({...form,start_date:e.target.value})} />
+            <input type="date" value={form.end_date} onChange={e=>setForm({...form,end_date:e.target.value})} />
+            <button className="primary" onClick={addHistory} disabled={busy}>추가</button>
+          </div>
+          <p className="muted">종료일을 비워두면 현재 근무중으로 표시됩니다.</p>
+        </section>
+
+        <section>
+          <h3>근무이력 목록</h3>
+          <table>
+            <thead><tr><th>매장</th><th>직책</th><th>기간</th><th>삭제</th></tr></thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.id}>
+                  <td>{r.store_name}</td>
+                  <td>{r.role}</td>
+                  <td>{r.start_date} ~ {r.end_date || '현재'}</td>
+                  <td><button className="dangerBtn" onClick={()=>deleteHistory(r)}>삭제</button></td>
+                </tr>
+              ))}
+              {!rows.length && <tr><td colSpan="4" className="muted">등록된 근무이력이 없습니다.</td></tr>}
+            </tbody>
+          </table>
+        </section>
       </div>
     </div>
   );
 }
-
 
 function ReviewDashboard({ user }) {
   const [targets, setTargets] = useState([]);
