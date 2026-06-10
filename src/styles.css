@@ -19,3 +19,6 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .badge.warn{background:#fef3c7;color:#92400e}
 .badge.danger{background:#fee2e2;color:#991b1b}
 .badge.today{background:#dbeafe;color:#1d4ed8}
+
+.reviewActions{display:flex;gap:8px;margin-top:12px}
+.dangerBtn{background:#dc2626}

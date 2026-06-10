@@ -209,6 +209,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
         {isAdmin && <button className={tab==='stores'?'active':''} onClick={()=>setTab('stores')}>매장관리</button>}
         {isAdmin && <button className={tab==='rawupload'?'active':''} onClick={()=>setTab('rawupload')}>RAW 업로드</button>}
         {isAdmin && <button className={tab==='targetgen'?'active':''} onClick={()=>setTab('targetgen')}>해피콜 생성</button>}
+        {(isAdmin || isChecker) && <button className={tab==='review'?'active':''} onClick={()=>setTab('review')}>검수</button>}
         {(isAdmin || isChecker) && <button className={tab==='allcalls'?'active':''} onClick={()=>setTab('allcalls')}>전체 해피콜</button>}
       </nav>
 
@@ -217,6 +218,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
         {tab === 'mycalls' && <CallList user={user} mode="mine" />}
         {tab === 'manager' && <ManagerStoreDashboardV6 user={user} />}
         {tab === 'storecalls' && <CallList user={user} mode="store" readOnly={true} />}
+        {tab === 'review' && <ReviewDashboard user={user} />}
         {tab === 'allcalls' && <CallList user={user} mode="all" />}
         {tab === 'employees' && <Employees />}
         {tab === 'stores' && <Stores />}
@@ -449,29 +451,37 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
       alert('불만 사항 있음은 메모가 필요합니다.');
       return;
     }
-    const payload = {
-      target_id: target.id,
-      join_no: target.join_no,
-      employee_name: user.name,
-      call_result: result,
-      call_detail: detail,
-      memo,
-      checked_by: user.name
-    };
-    const { error } = await supabase.from('happycall_logs').insert(payload);
-    if (error) return alert(error.message);
 
-    if (detail === '불만사항있음') {
-      await supabase.from('voc_logs').insert({
+    try {
+      const payload = {
         target_id: target.id,
         join_no: target.join_no,
-        customer_issue: memo,
-        status: '미처리'
-      });
+        employee_name: user.name,
+        call_result: result,
+        call_detail: detail,
+        memo,
+        checked_by: user.name,
+        review_status: '검수대기'
+      };
+
+      const { error } = await supabase.from('happycall_logs').insert(payload);
+      if (error) throw error;
+
+      if (detail === '불만사항있음') {
+        await supabase.from('voc_logs').insert({
+          target_id: target.id,
+          join_no: target.join_no,
+          customer_issue: memo,
+          status: '미처리'
+        });
+      }
+
+      alert('저장되었습니다. 검수 대기 상태로 등록되었습니다.');
+      onSaved();
+      onClose();
+    } catch (e) {
+      alert('저장 오류: ' + e.message);
     }
-    alert('저장되었습니다.');
-    onSaved();
-    onClose();
   }
 
   return (
@@ -635,6 +645,198 @@ function Employees() {
       {storeOptions.length <= 1 && (
         <p className="error">운영 매장 목록이 없습니다. 먼저 매장관리에서 매장을 등록해주세요.</p>
       )}
+    </div>
+  );
+}
+
+
+
+function ReviewDashboard({ user }) {
+  const [targets, setTargets] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [filter, setFilter] = useState('검수대기');
+
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    try {
+      const allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
+      const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
+      setTargets((allTargets || []).filter(t => !t.is_skipped));
+      setLogs(allLogs || []);
+    } catch (e) {
+      alert('검수 목록 조회 오류: ' + e.message);
+    }
+  }
+
+  const targetById = useMemo(() => {
+    const map = {};
+    targets.forEach(t => { map[t.id] = t; });
+    return map;
+  }, [targets]);
+
+  const reviewRows = useMemo(() => {
+    let rows = logs.map(log => ({
+      log,
+      target: targetById[log.target_id]
+    })).filter(r => r.target);
+
+    if (filter !== '전체') {
+      rows = rows.filter(r => (r.log.review_status || '검수대기') === filter);
+    }
+
+    rows.sort((a, b) => String(b.log.checked_at || '').localeCompare(String(a.log.checked_at || '')));
+    return rows;
+  }, [logs, targetById, filter]);
+
+  const stats = useMemo(() => {
+    const total = logs.length;
+    const pending = logs.filter(l => (l.review_status || '검수대기') === '검수대기').length;
+    const approved = logs.filter(l => l.review_status === '검수완료').length;
+    const rejected = logs.filter(l => l.review_status === '반려').length;
+    return { total, pending, approved, rejected };
+  }, [logs]);
+
+  return (
+    <div>
+      <h2>검수</h2>
+
+      <div className="stats">
+        <Card title="전체 완료건" value={stats.total} />
+        <Card title="검수대기" value={stats.pending} />
+        <Card title="검수완료" value={stats.approved} />
+        <Card title="반려" value={stats.rejected} />
+      </div>
+
+      <div className="filterBar">
+        <button className={filter==='검수대기'?'active':''} onClick={()=>setFilter('검수대기')}>검수대기 {stats.pending}</button>
+        <button className={filter==='검수완료'?'active':''} onClick={()=>setFilter('검수완료')}>검수완료 {stats.approved}</button>
+        <button className={filter==='반려'?'active':''} onClick={()=>setFilter('반려')}>반려 {stats.rejected}</button>
+        <button className={filter==='전체'?'active':''} onClick={()=>setFilter('전체')}>전체 {stats.total}</button>
+      </div>
+
+      <div className="sectionCard">
+        <table>
+          <thead>
+            <tr>
+              <th>가입번호</th>
+              <th>담당자</th>
+              <th>매장</th>
+              <th>결과</th>
+              <th>메모</th>
+              <th>검수상태</th>
+              <th>대상일</th>
+            </tr>
+          </thead>
+          <tbody>
+            {reviewRows.map(({log, target}) => (
+              <tr key={log.id} className="clickableRow" onClick={()=>setSelected({log, target})}>
+                <td>{target.join_no}</td>
+                <td>{target.assigned_employee}</td>
+                <td>{target.assigned_store}</td>
+                <td>{log.call_result} / {log.call_detail}</td>
+                <td>{log.memo ? '있음' : '-'}</td>
+                <td>{log.review_status || '검수대기'}</td>
+                <td>{target.target_date}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {selected && <ReviewModal item={selected} user={user} onClose={()=>setSelected(null)} onSaved={load} />}
+    </div>
+  );
+}
+
+function ReviewModal({ item, user, onClose, onSaved }) {
+  const { log, target } = item;
+  const [memo, setMemo] = useState(log.review_memo || '');
+  const [busy, setBusy] = useState(false);
+
+  async function approve() {
+    if (!confirm('검수 승인할까요?')) return;
+
+    setBusy(true);
+    try {
+      const { error } = await supabase.from('happycall_logs').update({
+        review_status: '검수완료',
+        reviewed_by: user.name,
+        reviewed_at: new Date().toISOString(),
+        review_memo: memo
+      }).eq('id', log.id);
+
+      if (error) throw error;
+
+      alert('검수 완료 처리되었습니다.');
+      onSaved();
+      onClose();
+    } catch (e) {
+      alert('검수 승인 오류: ' + e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reject() {
+    if (!memo.trim()) return alert('반려 사유를 입력해주세요.');
+    if (!confirm('이 건을 반려할까요?')) return;
+
+    setBusy(true);
+    try {
+      const { error } = await supabase.from('happycall_logs').update({
+        review_status: '반려',
+        reviewed_by: user.name,
+        reviewed_at: new Date().toISOString(),
+        review_memo: memo
+      }).eq('id', log.id);
+
+      if (error) throw error;
+
+      alert('반려 처리되었습니다.');
+      onSaved();
+      onClose();
+    } catch (e) {
+      alert('반려 처리 오류: ' + e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modalBg">
+      <div className="modal">
+        <div className="modalHead">
+          <h2>검수 상세</h2>
+          <button onClick={onClose}>닫기</button>
+        </div>
+
+        <section>
+          <h3>기본정보</h3>
+          <div className="infoGrid">
+            <p><b>가입번호</b><br />{target.join_no}</p>
+            <p><b>담당자</b><br />{target.assigned_employee}</p>
+            <p><b>매장</b><br />{target.assigned_store}</p>
+            <p><b>대상일</b><br />{target.target_date}</p>
+          </div>
+        </section>
+
+        <section>
+          <h3>직원 입력 결과</h3>
+          <p><b>{log.call_result}</b> / {log.call_detail}</p>
+          <p className="reason">{log.memo || '메모 없음'}</p>
+        </section>
+
+        <section>
+          <h3>검수 메모 / 반려 사유</h3>
+          <textarea value={memo} onChange={e=>setMemo(e.target.value)} placeholder="검수 메모 또는 반려 사유 입력" />
+          <div className="reviewActions">
+            <button className="primary" disabled={busy} onClick={approve}>검수 승인</button>
+            <button className="dangerBtn" disabled={busy} onClick={reject}>반려</button>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
