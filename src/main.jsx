@@ -205,12 +205,15 @@ function MainApp({ user, onLogout, onUserUpdate }) {
         <button className={tab==='mycalls'?'active':''} onClick={()=>setTab('mycalls')}>내 해피콜</button>
         {isManager && <button className={tab==='manager'?'active':''} onClick={()=>setTab('manager')}>매장 해피콜 현황</button>}
         {isManager && <button className={tab==='storecalls'?'active':''} onClick={()=>setTab('storecalls')}>매장 해피콜 현황</button>}
+        {isManager && <button className={tab==='storePerformance'?'active':''} onClick={()=>setTab('storePerformance')}>직원별 현황</button>}
         {isAdmin && <button className={tab==='employees'?'active':''} onClick={()=>setTab('employees')}>직원관리</button>}
         {isAdmin && <button className={tab==='stores'?'active':''} onClick={()=>setTab('stores')}>매장관리</button>}
         {isAdmin && <button className={tab==='rawupload'?'active':''} onClick={()=>setTab('rawupload')}>RAW 업로드</button>}
         {isAdmin && <button className={tab==='targetgen'?'active':''} onClick={()=>setTab('targetgen')}>해피콜 생성</button>}
         {(isAdmin || isChecker) && <button className={tab==='review'?'active':''} onClick={()=>setTab('review')}>검수</button>}
         {(isAdmin || isChecker) && <button className={tab==='allcalls'?'active':''} onClick={()=>setTab('allcalls')}>전체 해피콜</button>}
+        {(isAdmin || isChecker) && <button className={tab==='performance'?'active':''} onClick={()=>setTab('performance')}>직원별 현황</button>}
+        {isAdmin && <button className={tab==='audit'?'active':''} onClick={()=>setTab('audit')}>감사로그</button>}
       </nav>
 
       <main>
@@ -218,7 +221,10 @@ function MainApp({ user, onLogout, onUserUpdate }) {
         {tab === 'mycalls' && <CallList user={user} mode="mine" />}
         {tab === 'manager' && <ManagerStoreDashboardV6 user={user} />}
         {tab === 'storecalls' && <CallList user={user} mode="store" readOnly={true} />}
+        {tab === 'storePerformance' && <EmployeePerformanceDashboard user={user} mode="store" />}
         {tab === 'review' && <ReviewDashboard user={user} />}
+        {tab === 'performance' && <EmployeePerformanceDashboard user={user} mode="all" />}
+        {tab === 'audit' && <AuditLogsViewer />}
         {tab === 'allcalls' && <CallList user={user} mode="all" />}
         {tab === 'employees' && <Employees />}
         {tab === 'stores' && <Stores />}
@@ -231,6 +237,21 @@ function MainApp({ user, onLogout, onUserUpdate }) {
 }
 
 
+
+
+async function writeAuditLog(action, targetType, targetId, actor, detail = '') {
+  try {
+    await supabase.from('audit_logs').insert({
+      action,
+      target_type: targetType,
+      target_id: targetId,
+      actor_name: actor?.name || actor || '',
+      detail
+    });
+  } catch (e) {
+    console.warn('audit log skipped:', e.message);
+  }
+}
 
 function todayLocalISO() {
   const d = new Date();
@@ -506,6 +527,7 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
         });
       }
 
+      await writeAuditLog('해피콜저장', 'happycall_target', target.id, user, `${target.join_no} / ${result} / ${detail}`);
       alert('저장되었습니다. 검수 대기 상태로 등록되었습니다.');
       onSaved();
       onClose();
@@ -689,6 +711,139 @@ function Employees() {
 
 
 
+
+function AuditLogsViewer() {
+  const [logs, setLogs] = useState([]);
+
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    try {
+      const rows = await fetchAllRows('audit_logs', '*', 'created_at');
+      setLogs((rows || []).sort((a,b)=>String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 300));
+    } catch (e) {
+      alert('감사로그 조회 오류: ' + e.message);
+    }
+  }
+
+  return (
+    <div>
+      <h2>감사로그</h2>
+      <div className="sectionCard">
+        <table>
+          <thead>
+            <tr><th>일시</th><th>작업자</th><th>작업</th><th>대상</th><th>상세</th></tr>
+          </thead>
+          <tbody>
+            {logs.map(l => (
+              <tr key={l.id}>
+                <td>{String(l.created_at || '').slice(0, 19).replace('T', ' ')}</td>
+                <td>{l.actor_name}</td>
+                <td>{l.action}</td>
+                <td>{l.target_type} / {l.target_id}</td>
+                <td>{l.detail}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function EmployeePerformanceDashboard({ user, mode = 'all' }) {
+  const [targets, setTargets] = useState([]);
+  const [logs, setLogs] = useState([]);
+
+  useEffect(() => { load(); }, [mode]);
+
+  async function load() {
+    try {
+      const allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
+      const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
+
+      let visible = (allTargets || []).filter(t => !t.is_skipped);
+      if (mode === 'store') visible = visible.filter(t => t.assigned_store === user.store_name);
+
+      setTargets(visible);
+      setLogs(allLogs || []);
+    } catch (e) {
+      alert('직원별 현황 조회 오류: ' + e.message);
+    }
+  }
+
+  const latestLogByTarget = useMemo(() => {
+    const map = {};
+    logs.forEach(l => {
+      const prev = map[l.target_id];
+      if (!prev || String(l.checked_at || '') > String(prev.checked_at || '')) map[l.target_id] = l;
+    });
+    return map;
+  }, [logs]);
+
+  const rows = useMemo(() => {
+    const map = {};
+    targets.forEach(t => {
+      const name = t.assigned_employee || '미지정';
+      if (!map[name]) map[name] = { name, store: t.assigned_store || '', total: 0, done: 0, pending: 0, todayTotal: 0, todayDone: 0, overdue: 0, rejected: 0, reviewPending: 0, reviewDone: 0, voc: 0 };
+      const r = map[name];
+      const log = latestLogByTarget[t.id];
+      r.total += 1;
+      if (t.target_date === todayLocalISO()) {
+        r.todayTotal += 1;
+        if (log) r.todayDone += 1;
+      }
+      if (log) {
+        r.done += 1;
+        if ((log.review_status || '검수대기') === '검수대기') r.reviewPending += 1;
+        if (log.review_status === '검수완료') r.reviewDone += 1;
+        if (log.review_status === '반려') r.rejected += 1;
+        if (log.call_detail === '불만사항있음') r.voc += 1;
+      } else {
+        r.pending += 1;
+        if (diffDays(t.target_date) > 0) r.overdue += 1;
+      }
+    });
+    return Object.values(map).sort((a,b) => {
+      if (b.overdue !== a.overdue) return b.overdue - a.overdue;
+      if (b.pending !== a.pending) return b.pending - a.pending;
+      return String(a.name).localeCompare(String(b.name), 'ko');
+    });
+  }, [targets, latestLogByTarget]);
+
+  const total = rows.reduce((a,r)=>({
+    total: a.total + r.total, done: a.done + r.done, pending: a.pending + r.pending, overdue: a.overdue + r.overdue, rejected: a.rejected + r.rejected
+  }), { total:0, done:0, pending:0, overdue:0, rejected:0 });
+
+  return (
+    <div>
+      <h2>{mode === 'store' ? `${user.store_name} 직원별 해피콜 현황` : '직원별 해피콜 현황'}</h2>
+      <div className="stats">
+        <Card title="전체 대상" value={total.total} />
+        <Card title="전체 완료율" value={`${total.total ? Math.round(total.done / total.total * 1000) / 10 : 0}%`} />
+        <Card title="경과 미완료" value={total.overdue} />
+        <Card title="반려" value={total.rejected} />
+      </div>
+      <div className="sectionCard">
+        <table>
+          <thead><tr><th>담당자</th><th>매장</th><th>전체</th><th>완료</th><th>완료율</th><th>오늘 작업</th><th>오늘 완료율</th><th>미완료</th><th>경과</th><th>검수대기</th><th>검수완료</th><th>반려</th><th>VOC</th></tr></thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.name}>
+                <td>{r.name}</td><td>{r.store}</td><td>{r.total}</td><td>{r.done}</td>
+                <td>{r.total ? Math.round(r.done/r.total*1000)/10 : 0}%</td>
+                <td>{r.todayTotal}</td><td>{r.todayTotal ? Math.round(r.todayDone/r.todayTotal*1000)/10 : 0}%</td>
+                <td>{r.pending}</td><td>{r.overdue}</td><td>{r.reviewPending}</td><td>{r.reviewDone}</td><td>{r.rejected}</td><td>{r.voc}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+
 function ReviewDashboard({ user }) {
   const [targets, setTargets] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -807,6 +962,7 @@ function ReviewModal({ item, user, onClose, onSaved }) {
 
       if (error) throw error;
 
+      await writeAuditLog('검수완료', 'happycall_log', log.id, user, `${target.join_no} / ${target.assigned_employee}`);
       alert('검수 완료 처리되었습니다.');
       onSaved();
       onClose();
@@ -832,6 +988,7 @@ function ReviewModal({ item, user, onClose, onSaved }) {
 
       if (error) throw error;
 
+      await writeAuditLog('검수반려', 'happycall_log', log.id, user, `${target.join_no} / ${target.assigned_employee} / ${memo}`);
       alert('반려 처리되었습니다.');
       onSaved();
       onClose();
@@ -1380,15 +1537,36 @@ function TargetGenerator() {
 
   async function saveTargets() {
     if (!summary?.saveRows?.length) return alert('저장할 대상이 없습니다.');
-    if (!confirm(`${targetDate} 해피콜 대상 ${summary.saveRows.length}건을 저장할까요?\n기존 같은 날짜 대상은 삭제 후 다시 저장됩니다.`)) return;
+
+    if (!confirm(`${targetDate} 해피콜 대상 ${summary.saveRows.length}건을 저장할까요?
+기존 대상은 삭제하지 않고, 이미 있는 대상은 건너뜁니다.`)) return;
 
     setBusy(true);
-    try {
 
-      for (let i = 0; i < summary.saveRows.length; i += 500) {
-        const chunk = summary.saveRows.slice(i, i + 500);
+    try {
+      const { data: existingRows, error: existingError } = await supabase
+        .from('happycall_targets')
+        .select('id, join_no, target_date, call_type')
+        .eq('target_date', targetDate);
+
+      if (existingError) throw existingError;
+
+      const existingKeys = new Set(
+        (existingRows || []).map(r => `${r.join_no}|${r.target_date}|${r.call_type}`)
+      );
+
+      const insertRows = summary.saveRows.filter(r => {
+        const key = `${r.join_no}|${r.target_date}|${r.call_type}`;
+        return !existingKeys.has(key);
+      });
+
+      let saved = 0;
+
+      for (let i = 0; i < insertRows.length; i += 500) {
+        const chunk = insertRows.slice(i, i + 500);
         const { error } = await supabase.from('happycall_targets').insert(chunk);
         if (error) throw error;
+        saved += chunk.length;
       }
 
       const historyRows = summary.saveRows.map(r => ({
@@ -1401,11 +1579,14 @@ function TargetGenerator() {
 
       for (let i = 0; i < historyRows.length; i += 500) {
         const chunk = historyRows.slice(i, i + 500);
-        const { error } = await supabase.from('assignment_history').upsert(chunk, { onConflict: 'join_no' });
+        const { error } = await supabase
+          .from('assignment_history')
+          .upsert(chunk, { onConflict: 'join_no' });
+
         if (error) throw error;
       }
 
-      alert(`저장 완료: ${summary.saveRows.length}건`);
+      alert(`저장 완료: 신규 ${saved}건 / 기존 ${summary.saveRows.length - saved}건 건너뜀`);
     } catch(e) {
       alert('DB 저장 오류: ' + e.message);
     } finally {
