@@ -203,6 +203,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
       <nav>
         {(isAdmin || isChecker || isManager) && <button className={tab==='dashboard'?'active':''} onClick={()=>setTab('dashboard')}>대시보드</button>}
         <button className={tab==='mycalls'?'active':''} onClick={()=>setTab('mycalls')}>내 해피콜</button>
+        {isManager && <button className={tab==='manager'?'active':''} onClick={()=>setTab('manager')}>매장 해피콜 현황</button>}
         {isManager && <button className={tab==='storecalls'?'active':''} onClick={()=>setTab('storecalls')}>매장 해피콜 현황</button>}
         {isAdmin && <button className={tab==='employees'?'active':''} onClick={()=>setTab('employees')}>직원관리</button>}
         {isAdmin && <button className={tab==='stores'?'active':''} onClick={()=>setTab('stores')}>매장관리</button>}
@@ -214,6 +215,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
       <main>
         {tab === 'dashboard' && <Dashboard user={user} />}
         {tab === 'mycalls' && <CallList user={user} mode="mine" />}
+        {tab === 'manager' && <ManagerStoreDashboard user={user} />}
         {tab === 'storecalls' && <CallList user={user} mode="store" readOnly={true} />}
         {tab === 'allcalls' && <CallList user={user} mode="all" />}
         {tab === 'employees' && <Employees />}
@@ -306,6 +308,7 @@ function CallList({ user, mode, readOnly = false }) {
   async function load() {
     let q = supabase.from('happycall_targets').select('*').eq('is_skipped', false).order('target_date', { ascending: false });
     if (mode === 'mine') q = q.eq('assigned_employee', user.name);
+    if (mode === 'store') q = q.eq('assigned_store', user.store_name);
     if (mode === 'store') q = q.eq('assigned_store', user.store_name);
     const { data: t, error } = await q;
     if (error) alert(error.message);
@@ -684,65 +687,31 @@ function RawUpload() {
       alert('먼저 엑셀을 분석해주세요.');
       return;
     }
-
-    if (!confirm(`가입번호 기준으로 ${summary.rows.length}건을 저장/업데이트할까요?
-기존 고객 ID는 유지하고, 고객 정보만 업데이트합니다.`)) {
+    if (!confirm(`가입번호 기준으로 ${summary.rows.length}건을 빠르게 저장/업데이트할까요?
+기존 고객 ID는 건드리지 않고, 고객 정보만 갱신합니다.`)) {
       return;
     }
-
     setBusy(true);
-
     try {
-      const existingRows = await fetchAllRows('customers', 'id,join_no', 'join_no');
-      const existingJoinNos = new Set((existingRows || []).map(r => String(r.join_no)));
-
-      const insertRows = [];
-      const updateRows = [];
-
-      summary.rows.forEach(r => {
-        const cleanRow = {
-          join_no: r.join_no,
-          open_date: r.open_date,
-          store_name: r.store_name,
-          raw_store_name: r.raw_store_name,
-          seller_name: r.seller_name,
-          raw_sheet: r.raw_sheet,
-          raw_row: r.raw_row
-        };
-
-        if (existingJoinNos.has(String(r.join_no))) {
-          updateRows.push(cleanRow);
-        } else {
-          insertRows.push(cleanRow);
-        }
-      });
-
-      for (let i = 0; i < insertRows.length; i += 500) {
-        const chunk = insertRows.slice(i, i + 500);
-        const { error } = await supabase.from('customers').insert(chunk);
-        if (error) throw error;
-      }
-
-      for (let i = 0; i < updateRows.length; i++) {
-        const r = updateRows[i];
+      const cleanRows = summary.rows.map(r => ({
+        join_no: r.join_no,
+        open_date: r.open_date,
+        store_name: r.store_name,
+        raw_store_name: r.raw_store_name,
+        seller_name: r.seller_name,
+        raw_sheet: r.raw_sheet,
+        raw_row: r.raw_row
+      }));
+      let saved = 0;
+      for (let i = 0; i < cleanRows.length; i += 500) {
+        const chunk = cleanRows.slice(i, i + 500);
         const { error } = await supabase
           .from('customers')
-          .update({
-            open_date: r.open_date,
-            store_name: r.store_name,
-            raw_store_name: r.raw_store_name,
-            seller_name: r.seller_name,
-            raw_sheet: r.raw_sheet,
-            raw_row: r.raw_row
-          })
-          .eq('join_no', r.join_no);
-
+          .upsert(chunk, { onConflict: 'join_no', ignoreDuplicates: false });
         if (error) throw error;
+        saved += chunk.length;
       }
-
-      alert(`저장 완료
-신규 추가: ${insertRows.length}건
-기존 업데이트: ${updateRows.length}건`);
+      alert(`저장 완료: ${saved}건 저장/업데이트`);
     } catch (e) {
       alert('DB 저장 오류: ' + e.message);
     } finally {
@@ -852,7 +821,7 @@ function Stores() {
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(<ErrorBoundary><App /></ErrorBoundary>);
 function TargetGenerator() {
   const todayISO = new Date().toISOString().slice(0, 10);
   const [targetDate, setTargetDate] = useState(todayISO);
@@ -1147,6 +1116,77 @@ function TargetGenerator() {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+
+function ManagerStoreDashboard({ user }) {
+  const [targets, setTargets] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [selected, setSelected] = useState(null);
+  useEffect(() => { load(); }, []);
+  async function load() {
+    try {
+      const allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
+      const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
+      setTargets((allTargets || []).filter(t => !t.is_skipped && t.assigned_store === user.store_name));
+      setLogs(allLogs || []);
+    } catch (e) {
+      alert('매장 현황 조회 오류: ' + e.message);
+    }
+  }
+  const latestLogByTarget = useMemo(() => {
+    const map = {};
+    logs.forEach(l => { if (!map[l.target_id]) map[l.target_id] = l; });
+    return map;
+  }, [logs]);
+  const stats = useMemo(() => {
+    const total = targets.length;
+    const done = targets.filter(t => latestLogByTarget[t.id]).length;
+    const voc = targets.filter(t => latestLogByTarget[t.id]?.call_detail === '불만사항있음').length;
+    const absent = targets.filter(t => latestLogByTarget[t.id]?.call_result === '부재중').length;
+    const rejected = targets.filter(t => latestLogByTarget[t.id]?.call_result === '통화거부').length;
+    return { total, done, pending: total - done, voc, absent, rejected, rate: total ? Math.round(done / total * 1000) / 10 : 0 };
+  }, [targets, latestLogByTarget]);
+  const byEmployee = useMemo(() => {
+    const map = {};
+    targets.forEach(t => {
+      const k = t.assigned_employee || '미지정';
+      if (!map[k]) map[k] = { name: k, total: 0, done: 0, voc: 0 };
+      map[k].total++;
+      const log = latestLogByTarget[t.id];
+      if (log) map[k].done++;
+      if (log?.call_detail === '불만사항있음') map[k].voc++;
+    });
+    return Object.values(map).sort((a,b)=>String(a.name).localeCompare(String(b.name),'ko'));
+  }, [targets, latestLogByTarget]);
+  return (
+    <div>
+      <h2>{user.store_name} 해피콜 현황</h2>
+      <div className="stats">
+        <Card title="전체 대상" value={stats.total} />
+        <Card title="완료" value={stats.done} />
+        <Card title="미완료" value={stats.pending} />
+        <Card title="완료율" value={`${stats.rate}%`} />
+      </div>
+      <div className="stats miniStats">
+        <Card title="VOC" value={stats.voc} />
+        <Card title="부재중" value={stats.absent} />
+        <Card title="통화거부" value={stats.rejected} />
+        <Card title="담당자 수" value={byEmployee.length} />
+      </div>
+      <div className="sectionCard">
+        <h3>직원별 진행률</h3>
+        <table><thead><tr><th>담당자</th><th>전체</th><th>완료</th><th>미완료</th><th>완료율</th><th>VOC</th></tr></thead>
+        <tbody>{byEmployee.map(r => <tr key={r.name}><td>{r.name}</td><td>{r.total}</td><td>{r.done}</td><td>{r.total-r.done}</td><td>{r.total ? Math.round(r.done/r.total*1000)/10 : 0}%</td><td>{r.voc}</td></tr>)}</tbody></table>
+      </div>
+      <div className="sectionCard">
+        <h3>매장 해피콜 리스트</h3>
+        <table><thead><tr><th>가입번호</th><th>담당자</th><th>유형</th><th>대상일</th><th>상태</th><th>결과</th></tr></thead>
+        <tbody>{targets.map(t => { const log = latestLogByTarget[t.id]; return <tr key={t.id} onClick={()=>setSelected(t)} className="clickableRow"><td>{t.join_no}</td><td>{t.assigned_employee}</td><td>{callTypeLabel(t.call_type)}</td><td>{t.target_date}</td><td>{log ? '완료' : '미완료'}</td><td>{log ? `${log.call_result} / ${log.call_detail}` : '-'}</td></tr> })}</tbody></table>
+      </div>
+      {selected && <CallModal target={selected} user={user} onClose={() => setSelected(null)} onSaved={load} readOnly={true} />}
     </div>
   );
 }
