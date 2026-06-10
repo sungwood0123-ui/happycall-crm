@@ -161,6 +161,7 @@ function PasswordChangeModal({ user, onClose, onUserUpdate }) {
 
     const nextUser = { ...user, password: next };
     onUserUpdate(nextUser);
+    await writeAuditLog('비밀번호변경', 'employee', user.id, user, `${user.name} 비밀번호 변경`);
     alert('비밀번호가 변경되었습니다.');
     onClose();
   }
@@ -615,6 +616,7 @@ function Employees() {
 
     const { error } = await supabase.from('employees').insert(form);
     if (error) return alert(error.message);
+    await writeAuditLog('직원추가', 'employee', form.name, '관리자', `${form.name} / ${form.store_name} / ${form.role}`);
 
     setForm({
       name:'',
@@ -629,6 +631,7 @@ function Employees() {
   async function update(id, patch) {
     const { error } = await supabase.from('employees').update(patch).eq('id', id);
     if (error) alert(error.message);
+    else await writeAuditLog('직원수정', 'employee', id, '관리자', JSON.stringify(patch));
     load();
   }
 
@@ -732,7 +735,7 @@ function AuditLogsViewer() {
       <div className="sectionCard">
         <table>
           <thead>
-            <tr><th>일시</th><th>작업자</th><th>작업</th><th>대상</th><th>상세</th></tr>
+            <tr><th>일시</th><th>작업자</th><th>작업</th><th>상세</th></tr>
           </thead>
           <tbody>
             {logs.map(l => (
@@ -740,8 +743,7 @@ function AuditLogsViewer() {
                 <td>{String(l.created_at || '').slice(0, 19).replace('T', ' ')}</td>
                 <td>{l.actor_name}</td>
                 <td>{l.action}</td>
-                <td>{l.target_type} / {l.target_id}</td>
-                <td>{l.detail}</td>
+                <td>{l.detail || `${l.target_type || ''} ${l.target_id || ''}`}</td>
               </tr>
             ))}
           </tbody>
@@ -962,7 +964,7 @@ function ReviewModal({ item, user, onClose, onSaved }) {
 
       if (error) throw error;
 
-      await writeAuditLog('검수완료', 'happycall_log', log.id, user, `${target.join_no} / ${target.assigned_employee}`);
+      await writeAuditLog('검수완료', 'happycall_log', log.id, user, `${target.join_no} / ${target.assigned_employee} / ${log.call_result} / ${log.call_detail}`);
       alert('검수 완료 처리되었습니다.');
       onSaved();
       onClose();
@@ -988,7 +990,7 @@ function ReviewModal({ item, user, onClose, onSaved }) {
 
       if (error) throw error;
 
-      await writeAuditLog('검수반려', 'happycall_log', log.id, user, `${target.join_no} / ${target.assigned_employee} / ${memo}`);
+      await writeAuditLog('검수반려', 'happycall_log', log.id, user, `${target.join_no} / ${target.assigned_employee} / 반려사유: ${memo}`);
       alert('반려 처리되었습니다.');
       onSaved();
       onClose();
@@ -1174,6 +1176,7 @@ function RawUpload() {
         if (error) throw error;
         saved += chunk.length;
       }
+      await writeAuditLog('RAW저장', 'customers', 'bulk', '관리자', `customers ${saved}건 저장/업데이트`);
       alert(`저장 완료: ${saved}건 저장/업데이트`);
     } catch (e) {
       alert('DB 저장 오류: ' + e.message);
@@ -1260,10 +1263,11 @@ function Stores() {
     if (!form.name.trim()) return alert('매장명을 입력해주세요.');
     const { error } = await supabase.from('stores').insert(form);
     if (error) return alert(error.message);
+    await writeAuditLog('매장추가', 'store', form.name, '관리자', `${form.name} / ${form.status} / ${form.successor_store || ''}`);
     setForm({ name:'', status:'운영중', successor_store:'' });
     load();
   }
-  async function update(id, patch) { const { error } = await supabase.from('stores').update(patch).eq('id', id); if (error) alert(error.message); load(); }
+  async function update(id, patch) { const { error } = await supabase.from('stores').update(patch).eq('id', id); if (error) alert(error.message); else await writeAuditLog('매장수정', 'store', id, '관리자', JSON.stringify(patch)); load(); }
   return (
     <div>
       <h2>매장관리</h2>
@@ -1586,6 +1590,7 @@ function TargetGenerator() {
         if (error) throw error;
       }
 
+      await writeAuditLog('해피콜대상저장', 'happycall_targets', targetDate, '관리자', `${targetDate} 신규 ${saved}건 / 기존 ${summary.saveRows.length - saved}건 건너뜀`);
       alert(`저장 완료: 신규 ${saved}건 / 기존 ${summary.saveRows.length - saved}건 건너뜀`);
     } catch(e) {
       alert('DB 저장 오류: ' + e.message);
