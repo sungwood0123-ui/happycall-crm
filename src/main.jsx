@@ -312,51 +312,98 @@ function StatusBadge({ target, log }) {
 }
 
 
+
+function LastAuditNotice({ action, label }) {
+  const [item, setItem] = useState(null);
+
+  useEffect(() => { load(); }, [action]);
+
+  async function load() {
+    try {
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .eq('action', action)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (error) throw error;
+      setItem((data || [])[0] || null);
+    } catch (e) {
+      console.warn('last audit load skipped:', e.message);
+    }
+  }
+
+  return (
+    <div className="lastAuditNotice">
+      <b>{label}</b><br />
+      {item ? (
+        <>
+          <span>{String(item.created_at || '').slice(0, 19).replace('T', ' ')}</span>
+          <span> / 작업자: {item.actor_name || '-'}</span>
+          {item.detail && <p>{item.detail}</p>}
+        </>
+      ) : (
+        <span>아직 기록 없음</span>
+      )}
+    </div>
+  );
+}
+
 function UsageGuide({ user }) {
   const role = user?.role || '직원';
+
+  const guideMap = {
+    직원: {
+      title: '직원 사용방법',
+      items: [
+        '내 해피콜 탭에서 본인에게 배정된 고객을 확인합니다.',
+        '고객을 눌러 개통 이력과 연락 스크립트를 확인합니다.',
+        '통화 결과와 상세 결과를 직접 선택한 뒤 저장합니다.',
+        '검수 반려 건은 반려 사유를 확인하고 다시 저장합니다.'
+      ]
+    },
+    검수자: {
+      title: '검수자 사용방법',
+      items: [
+        '검수 탭에서 검수대기 건을 확인합니다.',
+        '직원 입력 결과와 메모를 확인합니다.',
+        '이상이 없으면 검수 승인, 보완이 필요하면 반려 처리합니다.',
+        '반려 시 직원이 이해할 수 있게 반려 사유를 작성합니다.',
+        '직원별 현황에서 진행률과 반려 현황을 확인합니다.'
+      ]
+    },
+    점장: {
+      title: '점장 사용방법',
+      items: [
+        '매장 해피콜 현황에서 당일 진행률과 경과 미완료를 확인합니다.',
+        '직원별 현황에서 직원별 완료율, 미완료, 반려 건수를 확인합니다.',
+        '고객 상세는 확인용이며 점장 화면에서는 결과 수정이 불가합니다.',
+        '미완료가 누적되는 직원은 별도로 진행 여부를 체크합니다.'
+      ]
+    },
+    관리자: {
+      title: '관리자 사용방법',
+      items: [
+        'RAW 업로드에서 엑셀을 분석하고 customers DB에 저장합니다.',
+        '해피콜 생성에서 대상일 기준 대상자를 계산하고 저장합니다.',
+        '직원관리에서 재직/퇴사/권한/비밀번호를 관리합니다.',
+        '매장관리에서 운영/폐점/승계매장을 관리합니다.',
+        '검수, 전체 해피콜, 직원별 현황, 감사로그를 확인합니다.'
+      ]
+    }
+  };
+
+  const guide = guideMap[role] || guideMap.직원;
 
   return (
     <div>
       <h2>사용방법</h2>
-      <div className="guideGrid">
-        <section className="sectionCard">
-          <h3>직원</h3>
-          <ol>
-            <li>내 해피콜 탭에서 본인에게 배정된 고객을 확인합니다.</li>
-            <li>고객을 눌러 개통 이력과 연락 스크립트를 확인합니다.</li>
-            <li>통화 결과와 상세 결과를 직접 선택한 뒤 저장합니다.</li>
-            <li>검수 반려 건은 반려 사유를 확인하고 다시 저장합니다.</li>
-          </ol>
-        </section>
-
-        <section className="sectionCard">
-          <h3>검수자</h3>
-          <ol>
-            <li>검수 탭에서 검수대기 건을 확인합니다.</li>
-            <li>직원 입력 결과와 메모를 확인합니다.</li>
-            <li>이상이 없으면 검수 승인, 보완이 필요하면 반려 처리합니다.</li>
-            <li>반려 시 직원이 이해할 수 있게 반려 사유를 작성합니다.</li>
-          </ol>
-        </section>
-
-        <section className="sectionCard">
-          <h3>점장</h3>
-          <ol>
-            <li>매장 해피콜 현황에서 당일 진행률과 경과 미완료를 확인합니다.</li>
-            <li>직원별 현황에서 직원별 완료율, 미완료, 반려 건수를 확인합니다.</li>
-            <li>점장 화면에서는 확인만 가능하며 직원 결과 수정은 불가합니다.</li>
-          </ol>
-        </section>
-
-        <section className="sectionCard">
-          <h3>관리자</h3>
-          <ol>
-            <li>RAW 업로드에서 엑셀을 분석하고 customers DB에 저장합니다.</li>
-            <li>해피콜 생성에서 대상일 기준 대상자를 계산하고 저장합니다.</li>
-            <li>직원관리와 매장관리에서 재직/퇴사/권한/매장 승계를 관리합니다.</li>
-            <li>감사로그에서 주요 작업 이력을 확인합니다.</li>
-          </ol>
-        </section>
+      <div className="sectionCard guideFocus">
+        <h3>{guide.title}</h3>
+        <ol>
+          {guide.items.map((item, idx) => <li key={idx}>{item}</li>)}
+        </ol>
       </div>
       <div className="sectionCard">
         <h3>현재 로그인 권한</h3>
@@ -365,7 +412,6 @@ function UsageGuide({ user }) {
     </div>
   );
 }
-
 
 function Dashboard({ user }) {
   const [targets, setTargets] = useState([]);
@@ -662,6 +708,7 @@ function Employees({ user }) {
   const [rows, setRows] = useState([]);
   const [storeOptions, setStoreOptions] = useState([]);
   const [form, setForm] = useState({ name:'', store_name:'금촌', status:'재직', password:'1234', role:'직원' });
+  const [passwordDrafts, setPasswordDrafts] = useState({});
 
   useEffect(() => { load(); }, []);
 
@@ -705,6 +752,24 @@ function Employees({ user }) {
     const { error } = await supabase.from('employees').update(patch).eq('id', id);
     if (error) alert(error.message);
     else await writeAuditLog('직원수정', 'employee', id, user, formatAuditPatch(patch));
+    load();
+  }
+
+  async function savePassword(employee) {
+    const nextPassword = passwordDrafts[employee.id];
+    if (!nextPassword) return alert('변경할 비밀번호를 입력해주세요.');
+    if (!confirm(`${employee.name} 직원의 비밀번호를 변경 저장할까요?`)) return;
+
+    const { error } = await supabase.from('employees').update({ password: nextPassword }).eq('id', employee.id);
+    if (error) return alert(error.message);
+
+    await writeAuditLog('비밀번호변경', 'employee', employee.id, user, `대상: ${employee.name} / 비밀번호 변경됨`);
+    setPasswordDrafts(prev => {
+      const copy = { ...prev };
+      delete copy[employee.id];
+      return copy;
+    });
+    alert(`${employee.name} 비밀번호가 변경 저장되었습니다.`);
     load();
   }
 
@@ -762,7 +827,17 @@ function Employees({ user }) {
                   <option>리스트 제외</option>
                 </select>
               </td>
-              <td><input value={r.password||''} onChange={e=>update(r.id,{password:e.target.value})} /></td>
+              <td>
+                <div className="passwordEdit">
+                  <input
+                    value={passwordDrafts[r.id] ?? ''}
+                    onChange={e=>setPasswordDrafts(prev => ({ ...prev, [r.id]: e.target.value }))}
+                    placeholder="새 비밀번호"
+                  />
+                  <button onClick={() => savePassword(r)}>변경 저장</button>
+                </div>
+                <p className="muted smallText">현재값은 보안상 표시하지 않음</p>
+              </td>
               <td>
                 <select value={r.role||'직원'} onChange={e=>update(r.id,{role:e.target.value})}>
                   <option>직원</option>
@@ -771,7 +846,7 @@ function Employees({ user }) {
                   <option>관리자</option>
                 </select>
               </td>
-              <td><button onClick={() => { if(confirm(`${r.name} 비밀번호를 1234로 초기화할까요?`)) update(r.id,{password:'1234'}); }}>1234 초기화</button></td>
+              <td><button onClick={async () => { if(confirm(`${r.name} 비밀번호를 1234로 초기화할까요?`)) { const { error } = await supabase.from('employees').update({password:'1234'}).eq('id', r.id); if (error) alert(error.message); else { await writeAuditLog('비밀번호초기화', 'employee', r.id, user, `대상: ${r.name} / 1234 초기화`); load(); } } }}>1234 초기화</button></td>
             </tr>
           ))}
         </tbody>
@@ -1261,6 +1336,7 @@ function RawUpload({ user }) {
   return (
     <div>
       <h2>RAW 업로드</h2>
+      <LastAuditNotice action="RAW저장" label="마지막 RAW 저장" />
 
       <div className="uploadBox">
         <p className="muted">엑셀 파일 1개 안의 연도별 시트(2024, 2025, 2026...)를 자동으로 읽습니다.</p>
@@ -1675,6 +1751,7 @@ function TargetGenerator({ user }) {
   return (
     <div>
       <h2>해피콜 생성</h2>
+      <LastAuditNotice action="해피콜대상저장" label="마지막 해피콜 대상 저장" />
       <div className="uploadBox">
         <p className="muted">대상일 기준으로 D+1, D+7, D+13, D+95, D+185와 월간 정기 해피콜을 생성합니다.</p>
         <p className="muted">당월 D+ 해피콜이 있는 고객은 해당 월의 월간 정기 해피콜에서 제외됩니다.</p>

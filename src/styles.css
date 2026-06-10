@@ -90,3 +90,40 @@ button:disabled{opacity:.55;cursor:not-allowed}
     padding:6px 7px;
   }
 }
+
+/* V10 ops refine */
+.lastAuditNotice{
+  margin:10px 0 14px;
+  padding:12px 14px;
+  border:1px solid #fed7aa;
+  background:#fff7ed;
+  color:#ea580c;
+  border-radius:12px;
+  font-weight:700;
+}
+.lastAuditNotice p{
+  margin:6px 0 0;
+  color:#9a3412;
+  font-weight:600;
+}
+.passwordEdit{
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+.passwordEdit input{
+  min-width:120px;
+}
+.passwordEdit button{
+  white-space:nowrap;
+}
+.smallText{
+  font-size:11px;
+  margin-top:4px;
+}
+.guideFocus ol{
+  margin:8px 0 0 20px;
+}
+.guideFocus li{
+  margin-bottom:9px;
+}
