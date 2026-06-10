@@ -227,10 +227,10 @@ function MainApp({ user, onLogout, onUserUpdate }) {
         {tab === 'performance' && <EmployeePerformanceDashboard user={user} mode="all" />}
         {tab === 'audit' && <AuditLogsViewer />}
         {tab === 'allcalls' && <CallList user={user} mode="all" />}
-        {tab === 'employees' && <Employees />}
-        {tab === 'stores' && <Stores />}
-        {tab === 'rawupload' && <RawUpload />}
-        {tab === 'targetgen' && <TargetGenerator />}
+        {tab === 'employees' && <Employees user={user} />}
+        {tab === 'stores' && <Stores user={user} />}
+        {tab === 'rawupload' && <RawUpload user={user} />}
+        {tab === 'targetgen' && <TargetGenerator user={user} />}
       </main>
       {showPassword && <PasswordChangeModal user={user} onClose={() => setShowPassword(false)} onUserUpdate={onUserUpdate} />}
     </div>
@@ -585,7 +585,7 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
 }
 
 
-function Employees() {
+function Employees({ user }) {
   const [rows, setRows] = useState([]);
   const [storeOptions, setStoreOptions] = useState([]);
   const [form, setForm] = useState({ name:'', store_name:'금촌', status:'재직', password:'1234', role:'직원' });
@@ -616,7 +616,7 @@ function Employees() {
 
     const { error } = await supabase.from('employees').insert(form);
     if (error) return alert(error.message);
-    await writeAuditLog('직원추가', 'employee', form.name, '관리자', `${form.name} / ${form.store_name} / ${form.role}`);
+    await writeAuditLog('직원추가', 'employee', form.name, user, `${form.name} / ${form.store_name} / ${form.role}`);
 
     setForm({
       name:'',
@@ -631,7 +631,7 @@ function Employees() {
   async function update(id, patch) {
     const { error } = await supabase.from('employees').update(patch).eq('id', id);
     if (error) alert(error.message);
-    else await writeAuditLog('직원수정', 'employee', id, '관리자', JSON.stringify(patch));
+    else await writeAuditLog('직원수정', 'employee', id, user, JSON.stringify(patch));
     load();
   }
 
@@ -1039,7 +1039,7 @@ function ReviewModal({ item, user, onClose, onSaved }) {
 }
 
 
-function RawUpload() {
+function RawUpload({ user }) {
   const [fileName, setFileName] = useState('');
   const [summary, setSummary] = useState(null);
   const [preview, setPreview] = useState([]);
@@ -1176,7 +1176,7 @@ function RawUpload() {
         if (error) throw error;
         saved += chunk.length;
       }
-      await writeAuditLog('RAW저장', 'customers', 'bulk', '관리자', `customers ${saved}건 저장/업데이트`);
+      await writeAuditLog('RAW저장', 'customers', 'bulk', user, `customers ${saved}건 저장/업데이트`);
       alert(`저장 완료: ${saved}건 저장/업데이트`);
     } catch (e) {
       alert('DB 저장 오류: ' + e.message);
@@ -1254,7 +1254,7 @@ function RawUpload() {
 }
 
 
-function Stores() {
+function Stores({ user }) {
   const [rows, setRows] = useState([]);
   const [form, setForm] = useState({ name:'', status:'운영중', successor_store:'' });
   useEffect(() => { load(); }, []);
@@ -1263,11 +1263,11 @@ function Stores() {
     if (!form.name.trim()) return alert('매장명을 입력해주세요.');
     const { error } = await supabase.from('stores').insert(form);
     if (error) return alert(error.message);
-    await writeAuditLog('매장추가', 'store', form.name, '관리자', `${form.name} / ${form.status} / ${form.successor_store || ''}`);
+    await writeAuditLog('매장추가', 'store', form.name, user, `${form.name} / ${form.status} / ${form.successor_store || ''}`);
     setForm({ name:'', status:'운영중', successor_store:'' });
     load();
   }
-  async function update(id, patch) { const { error } = await supabase.from('stores').update(patch).eq('id', id); if (error) alert(error.message); else await writeAuditLog('매장수정', 'store', id, '관리자', JSON.stringify(patch)); load(); }
+  async function update(id, patch) { const { error } = await supabase.from('stores').update(patch).eq('id', id); if (error) alert(error.message); else await writeAuditLog('매장수정', 'store', id, user, JSON.stringify(patch)); load(); }
   return (
     <div>
       <h2>매장관리</h2>
@@ -1355,7 +1355,7 @@ function resolveAssigneeV8Compact(customer, customers, employees, stores, histor
   return { assigned_employee: '배정불가', assigned_store: assignStore, reason: '재직자 없음' };
 }
 
-function TargetGenerator() {
+function TargetGenerator({ user }) {
   const todayISO = new Date().toISOString().slice(0, 10);
   const [targetDate, setTargetDate] = useState(todayISO);
   const [busy, setBusy] = useState(false);
@@ -1590,7 +1590,7 @@ function TargetGenerator() {
         if (error) throw error;
       }
 
-      await writeAuditLog('해피콜대상저장', 'happycall_targets', targetDate, '관리자', `${targetDate} 신규 ${saved}건 / 기존 ${summary.saveRows.length - saved}건 건너뜀`);
+      await writeAuditLog('해피콜대상저장', 'happycall_targets', targetDate, user, `${targetDate} 신규 ${saved}건 / 기존 ${summary.saveRows.length - saved}건 건너뜀`);
       alert(`저장 완료: 신규 ${saved}건 / 기존 ${summary.saveRows.length - saved}건 건너뜀`);
     } catch(e) {
       alert('DB 저장 오류: ' + e.message);
