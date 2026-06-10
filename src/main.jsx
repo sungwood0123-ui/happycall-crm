@@ -215,7 +215,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
       <main>
         {tab === 'dashboard' && <Dashboard user={user} />}
         {tab === 'mycalls' && <CallList user={user} mode="mine" />}
-        {tab === 'manager' && <ManagerStoreDashboard user={user} />}
+        {tab === 'manager' && <ManagerStoreDashboardV6 user={user} />}
         {tab === 'storecalls' && <CallList user={user} mode="store" readOnly={true} />}
         {tab === 'allcalls' && <CallList user={user} mode="all" />}
         {tab === 'employees' && <Employees />}
@@ -228,6 +228,56 @@ function MainApp({ user, onLogout, onUserUpdate }) {
   );
 }
 
+
+
+function todayLocalISO() {
+  const d = new Date();
+  const tz = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - tz).toISOString().slice(0, 10);
+}
+function diffDays(dateText, baseText = todayLocalISO()) {
+  const a = new Date(String(dateText).slice(0, 10) + 'T00:00:00');
+  const b = new Date(String(baseText).slice(0, 10) + 'T00:00:00');
+  return Math.floor((b - a) / 86400000);
+}
+function calculateCallStats(targets, latestLogByTarget, today = todayLocalISO()) {
+  const total = targets.length;
+  const done = targets.filter(t => latestLogByTarget[t.id]).length;
+  const pending = total - done;
+  const todayTargets = targets.filter(t => t.target_date === today);
+  const todayDone = todayTargets.filter(t => latestLogByTarget[t.id]).length;
+  const overdueTargets = targets.filter(t => !latestLogByTarget[t.id] && diffDays(t.target_date, today) > 0);
+  const voc = targets.filter(t => latestLogByTarget[t.id]?.call_detail === '불만사항있음').length;
+  const absent = targets.filter(t => latestLogByTarget[t.id]?.call_result === '부재중').length;
+  const rejected = targets.filter(t => latestLogByTarget[t.id]?.call_result === '통화거부').length;
+  return { total, done, pending, rate: total ? Math.round(done/total*1000)/10 : 0,
+    todayTotal: todayTargets.length, todayDone, todayPending: todayTargets.length - todayDone,
+    todayRate: todayTargets.length ? Math.round(todayDone/todayTargets.length*1000)/10 : 0,
+    overdue: overdueTargets.length, voc, absent, rejected };
+}
+function sortTargetsByPriority(a, b, latestLogByTarget, today = todayLocalISO()) {
+  const rank = (t) => {
+    if (latestLogByTarget[t.id]) return 3;
+    const d = diffDays(t.target_date, today);
+    if (d > 0) return 0;
+    if (d === 0) return 1;
+    return 2;
+  };
+  const r = rank(a)-rank(b);
+  if (r !== 0) return r;
+  const da = diffDays(a.target_date, today);
+  const db = diffDays(b.target_date, today);
+  if (!latestLogByTarget[a.id] && !latestLogByTarget[b.id] && da !== db) return db-da;
+  return String(b.target_date).localeCompare(String(a.target_date));
+}
+function StatusBadge({ target, log }) {
+  if (log) return <span className="badge done">완료</span>;
+  const overdueDays = diffDays(target.target_date);
+  if (overdueDays > 0) return <span className={overdueDays >= 3 ? "badge danger" : "badge warn"}>{overdueDays}일 경과</span>;
+  if (overdueDays === 0) return <span className="badge today">오늘 신규</span>;
+  return <span className="badge">예정</span>;
+}
+
 function Dashboard({ user }) {
   const [targets, setTargets] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -235,86 +285,16 @@ function Dashboard({ user }) {
   useEffect(() => { load(); }, []);
 
   async function load() {
-    let q = supabase.from('happycall_targets').select('*').eq('is_skipped', false);
-    if (user.role === '점장') q = q.eq('assigned_store', user.store_name);
-    const { data: t } = await q;
-    const { data: l } = await supabase.from('happycall_logs').select('*');
-    setTargets(t || []);
-    setLogs(l || []);
-  }
-
-  const targetIds = new Set(targets.map(t => t.id));
-  const filteredLogs = logs.filter(l => targetIds.has(l.target_id));
-  const loggedTargetIds = new Set(filteredLogs.map(l => l.target_id));
-  const done = targets.filter(t => loggedTargetIds.has(t.id)).length;
-  const pending = targets.length - done;
-  const voc = filteredLogs.filter(l => l.call_detail === '불만사항있음').length;
-  const absent = filteredLogs.filter(l => l.call_result === '부재중').length;
-  const refused = filteredLogs.filter(l => l.call_result === '통화거부').length;
-  const doneRate = targets.length ? Math.round((done / targets.length) * 1000) / 10 : 0;
-
-  const byEmployee = {};
-  targets.forEach(t => {
-    const name = t.assigned_employee || '배정불가';
-    if (!byEmployee[name]) byEmployee[name] = { total: 0, done: 0 };
-    byEmployee[name].total += 1;
-    if (loggedTargetIds.has(t.id)) byEmployee[name].done += 1;
-  });
-  const employeeRows = Object.entries(byEmployee).map(([name, v]) => ({
-    name,
-    total: v.total,
-    done: v.done,
-    pending: v.total - v.done,
-    rate: v.total ? Math.round((v.done / v.total) * 1000) / 10 : 0
-  })).sort((a,b)=>String(a.name).localeCompare(String(b.name),'ko'));
-
-  return (
-    <div>
-      <h2>{user.role === '점장' ? `${user.store_name} 매장 대시보드` : '대시보드'}</h2>
-      <div className="stats">
-        <Card title="전체 대상" value={targets.length} />
-        <Card title="완료" value={done} />
-        <Card title="미완료" value={pending} />
-        <Card title="완료율" value={`${doneRate}%`} />
-        <Card title="불만 있음" value={voc} />
-        <Card title="부재중" value={absent} />
-        <Card title="통화거부" value={refused} />
-      </div>
-
-      {user.role === '점장' && (
-        <div className="sectionCard">
-          <h3>직원별 진행률</h3>
-          <table>
-            <thead><tr><th>직원</th><th>대상</th><th>완료</th><th>미완료</th><th>완료율</th></tr></thead>
-            <tbody>{employeeRows.map(r => <tr key={r.name}><td>{r.name}</td><td>{r.total}</td><td>{r.done}</td><td>{r.pending}</td><td>{r.rate}%</td></tr>)}</tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Card({ title, value }) {
-  return <div className="stat"><span>{title}</span><b>{value}</b></div>;
-}
-
-function CallList({ user, mode, readOnly = false }) {
-  const [targets, setTargets] = useState([]);
-  const [logs, setLogs] = useState([]);
-  const [selected, setSelected] = useState(null);
-
-  useEffect(() => { load(); }, [mode]);
-
-  async function load() {
-    let q = supabase.from('happycall_targets').select('*').eq('is_skipped', false).order('target_date', { ascending: false });
-    if (mode === 'mine') q = q.eq('assigned_employee', user.name);
-    if (mode === 'store') q = q.eq('assigned_store', user.store_name);
-    if (mode === 'store') q = q.eq('assigned_store', user.store_name);
-    const { data: t, error } = await q;
-    if (error) alert(error.message);
-    setTargets(t || []);
-    const { data: l } = await supabase.from('happycall_logs').select('*').order('checked_at', { ascending: false });
-    setLogs(l || []);
+    try {
+      const allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
+      const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
+      let visible = (allTargets || []).filter(t => !t.is_skipped);
+      if (user?.role === '점장') visible = visible.filter(t => t.assigned_store === user.store_name);
+      setTargets(visible);
+      setLogs(allLogs || []);
+    } catch (e) {
+      alert('대시보드 조회 오류: ' + e.message);
+    }
   }
 
   const latestLogByTarget = useMemo(() => {
@@ -323,25 +303,111 @@ function CallList({ user, mode, readOnly = false }) {
     return map;
   }, [logs]);
 
+  const stats = useMemo(() => calculateCallStats(targets, latestLogByTarget), [targets, latestLogByTarget]);
+
   return (
     <div>
-      <h2>{mode === 'mine' ? '내 해피콜 리스트' : mode === 'store' ? `${user.store_name} 해피콜 진행현황` : '전체 해피콜 리스트'}</h2>
+      <h2>대시보드</h2>
+      <div className="stats">
+        <Card title="전체 대상" value={stats.total} />
+        <Card title="전체 완료율" value={`${stats.rate}%`} />
+        <Card title="오늘 작업 완료율" value={`${stats.todayRate}%`} />
+        <Card title="경과 미완료" value={stats.overdue} />
+      </div>
+      <div className="stats miniStats">
+        <Card title="완료" value={stats.done} />
+        <Card title="미완료" value={stats.pending} />
+        <Card title="오늘 신규" value={stats.todayTotal} />
+        <Card title="VOC" value={stats.voc} />
+      </div>
+    </div>
+  );
+}
+
+function Card({ title, value }) {
+  return <div className="stat"><span>{title}</span><b>{value}</b></div>;
+}
+
+
+function CallList({ user, mode, readOnly = false }) {
+  const [targets, setTargets] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [filter, setFilter] = useState('미완료전체');
+
+  useEffect(() => { load(); }, [mode]);
+
+  async function load() {
+    try {
+      let allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
+      let visible = (allTargets || []).filter(t => !t.is_skipped);
+      if (mode === 'mine') visible = visible.filter(t => t.assigned_employee === user.name);
+      if (mode === 'store') visible = visible.filter(t => t.assigned_store === user.store_name);
+      const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
+      setTargets(visible);
+      setLogs(allLogs || []);
+    } catch (e) {
+      alert('해피콜 리스트 조회 오류: ' + e.message);
+    }
+  }
+
+  const latestLogByTarget = useMemo(() => {
+    const map = {};
+    logs.forEach(l => { if (!map[l.target_id]) map[l.target_id] = l; });
+    return map;
+  }, [logs]);
+
+  const stats = useMemo(() => calculateCallStats(targets, latestLogByTarget), [targets, latestLogByTarget]);
+
+  const filteredTargets = useMemo(() => {
+    let list = [...targets];
+    if (filter === '경과미완료') list = list.filter(t => !latestLogByTarget[t.id] && diffDays(t.target_date) > 0);
+    else if (filter === '오늘신규') list = list.filter(t => t.target_date === todayLocalISO());
+    else if (filter === '미완료전체') list = list.filter(t => !latestLogByTarget[t.id]);
+    else if (filter === '완료') list = list.filter(t => latestLogByTarget[t.id]);
+    return list.sort((a,b)=>sortTargetsByPriority(a,b,latestLogByTarget));
+  }, [targets, latestLogByTarget, filter]);
+
+  const title = mode === 'mine' ? '내 해피콜 리스트' : mode === 'store' ? `${user.store_name} 해피콜 진행현황` : '전체 해피콜 리스트';
+
+  return (
+    <div>
+      <h2>{title}</h2>
+      <div className="stats">
+        <Card title="전체 대상" value={stats.total} />
+        <Card title="전체 완료율" value={`${stats.rate}%`} />
+        <Card title="오늘 작업 완료율" value={`${stats.todayRate}%`} />
+        <Card title="경과 미완료" value={stats.overdue} />
+      </div>
+      <div className="stats miniStats">
+        <Card title="오늘 신규" value={stats.todayTotal} />
+        <Card title="오늘 완료" value={stats.todayDone} />
+        <Card title="전체 미완료" value={stats.pending} />
+        <Card title="VOC" value={stats.voc} />
+      </div>
+      <div className="filterBar">
+        <button className={filter==='미완료전체'?'active':''} onClick={()=>setFilter('미완료전체')}>미완료 전체 {stats.pending}</button>
+        <button className={filter==='경과미완료'?'active':''} onClick={()=>setFilter('경과미완료')}>경과 미완료 {stats.overdue}</button>
+        <button className={filter==='오늘신규'?'active':''} onClick={()=>setFilter('오늘신규')}>오늘 신규 {stats.todayTotal}</button>
+        <button className={filter==='완료'?'active':''} onClick={()=>setFilter('완료')}>완료 {stats.done}</button>
+        <button className={filter==='전체'?'active':''} onClick={()=>setFilter('전체')}>전체 {stats.total}</button>
+      </div>
       <div className="list">
-        {targets.map(t => {
+        {filteredTargets.map(t => {
           const log = latestLogByTarget[t.id];
           return (
-            <div className="callItem" key={t.id} onClick={() => setSelected(t)}>
+            <div className="callItem" key={t.id} onClick={()=>setSelected(t)}>
               <div>
                 <b>{t.join_no}</b>
                 <p>{t.assigned_store} · {t.assigned_employee} · {callTypeLabel(t.call_type)}</p>
-                <p className="muted">대상일 {t.target_date} / {t.assign_reason || t.skip_reason || ''}</p>
+                <p className="muted">대상일 {t.target_date} / {t.skip_reason || t.assign_reason || ''}</p>
               </div>
-              <span className={log ? 'badge done' : 'badge'}>{log ? log.call_result : '미진행'}</span>
+              <StatusBadge target={t} log={log} />
             </div>
           );
         })}
       </div>
-      {selected && <CallModal target={selected} user={user} onClose={() => setSelected(null)} onSaved={load} readOnly={readOnly} />}
+      {selected && <CallModal target={selected} user={user} onClose={()=>setSelected(null)} onSaved={load} readOnly={readOnly} />}
     </div>
   );
 }
@@ -1192,3 +1258,120 @@ function ManagerStoreDashboard({ user }) {
 }
 
 
+
+
+function ManagerStoreDashboardV6({ user }) {
+  const [targets, setTargets] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [filter, setFilter] = useState('미완료전체');
+
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    try {
+      const allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
+      const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
+      setTargets((allTargets || []).filter(t => !t.is_skipped && t.assigned_store === user.store_name));
+      setLogs(allLogs || []);
+    } catch (e) {
+      alert('매장 현황 조회 오류: ' + e.message);
+    }
+  }
+
+  const latestLogByTarget = useMemo(() => {
+    const map = {};
+    logs.forEach(l => { if (!map[l.target_id]) map[l.target_id] = l; });
+    return map;
+  }, [logs]);
+
+  const stats = useMemo(() => calculateCallStats(targets, latestLogByTarget), [targets, latestLogByTarget]);
+
+  const byEmployee = useMemo(() => {
+    const map = {};
+    targets.forEach(t => {
+      const k = t.assigned_employee || '미지정';
+      if (!map[k]) map[k] = { name:k,total:0,done:0,todayTotal:0,todayDone:0,overdue:0,voc:0 };
+      map[k].total++;
+      const log = latestLogByTarget[t.id];
+      if (log) map[k].done++;
+      if (t.target_date === todayLocalISO()) {
+        map[k].todayTotal++;
+        if (log) map[k].todayDone++;
+      }
+      if (!log && diffDays(t.target_date) > 0) map[k].overdue++;
+      if (log?.call_detail === '불만사항있음') map[k].voc++;
+    });
+    return Object.values(map).sort((a,b)=>String(a.name).localeCompare(String(b.name),'ko'));
+  }, [targets, latestLogByTarget]);
+
+  const filteredTargets = useMemo(() => {
+    let list = [...targets];
+    if (filter === '경과미완료') list = list.filter(t => !latestLogByTarget[t.id] && diffDays(t.target_date) > 0);
+    else if (filter === '오늘신규') list = list.filter(t => t.target_date === todayLocalISO());
+    else if (filter === '미완료전체') list = list.filter(t => !latestLogByTarget[t.id]);
+    else if (filter === '완료') list = list.filter(t => latestLogByTarget[t.id]);
+    return list.sort((a,b)=>sortTargetsByPriority(a,b,latestLogByTarget));
+  }, [targets, latestLogByTarget, filter]);
+
+  return (
+    <div>
+      <h2>{user.store_name} 해피콜 현황</h2>
+      <div className="stats">
+        <Card title="전체 대상" value={stats.total} />
+        <Card title="전체 완료율" value={`${stats.rate}%`} />
+        <Card title="오늘 작업 완료율" value={`${stats.todayRate}%`} />
+        <Card title="경과 미완료" value={stats.overdue} />
+      </div>
+      <div className="stats miniStats">
+        <Card title="오늘 신규" value={stats.todayTotal} />
+        <Card title="오늘 완료" value={stats.todayDone} />
+        <Card title="전체 미완료" value={stats.pending} />
+        <Card title="VOC" value={stats.voc} />
+      </div>
+      <div className="sectionCard">
+        <h3>직원별 진행률</h3>
+        <table>
+          <thead><tr><th>담당자</th><th>전체</th><th>완료</th><th>전체 완료율</th><th>오늘 작업</th><th>오늘 완료율</th><th>경과 미완료</th><th>VOC</th></tr></thead>
+          <tbody>
+            {byEmployee.map(r => (
+              <tr key={r.name}>
+                <td>{r.name}</td><td>{r.total}</td><td>{r.done}</td>
+                <td>{r.total ? Math.round(r.done/r.total*1000)/10 : 0}%</td>
+                <td>{r.todayTotal}</td>
+                <td>{r.todayTotal ? Math.round(r.todayDone/r.todayTotal*1000)/10 : 0}%</td>
+                <td>{r.overdue}</td><td>{r.voc}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="sectionCard">
+        <h3>매장 해피콜 리스트</h3>
+        <div className="filterBar">
+          <button className={filter==='미완료전체'?'active':''} onClick={()=>setFilter('미완료전체')}>미완료 전체 {stats.pending}</button>
+          <button className={filter==='경과미완료'?'active':''} onClick={()=>setFilter('경과미완료')}>경과 미완료 {stats.overdue}</button>
+          <button className={filter==='오늘신규'?'active':''} onClick={()=>setFilter('오늘신규')}>오늘 신규 {stats.todayTotal}</button>
+          <button className={filter==='완료'?'active':''} onClick={()=>setFilter('완료')}>완료 {stats.done}</button>
+          <button className={filter==='전체'?'active':''} onClick={()=>setFilter('전체')}>전체 {stats.total}</button>
+        </div>
+        <table>
+          <thead><tr><th>가입번호</th><th>담당자</th><th>유형</th><th>대상일</th><th>상태</th><th>결과</th></tr></thead>
+          <tbody>
+            {filteredTargets.map(t => {
+              const log = latestLogByTarget[t.id];
+              return (
+                <tr key={t.id} onClick={()=>setSelected(t)} className="clickableRow">
+                  <td>{t.join_no}</td><td>{t.assigned_employee}</td><td>{callTypeLabel(t.call_type)}</td><td>{t.target_date}</td>
+                  <td><StatusBadge target={t} log={log} /></td>
+                  <td>{log ? `${log.call_result} / ${log.call_detail}` : '-'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {selected && <CallModal target={selected} user={user} onClose={()=>setSelected(null)} onSaved={load} readOnly={true} />}
+    </div>
+  );
+}
