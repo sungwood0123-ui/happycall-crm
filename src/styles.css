@@ -398,3 +398,160 @@ button:disabled{opacity:.55;cursor:not-allowed}
     grid-template-columns:1fr;
   }
 }
+
+/* V11.4 UI balance */
+.employeeTableWrap{
+  overflow-x:auto;
+}
+.compactEmployeeTable{
+  font-size:12px;
+  table-layout:auto;
+}
+.compactEmployeeTable th,
+.compactEmployeeTable td{
+  padding:9px 8px !important;
+  vertical-align:middle !important;
+  white-space:nowrap !important;
+  line-height:1.2 !important;
+}
+.compactEmployeeTable select,
+.compactEmployeeTable input,
+.compactEmployeeTable button,
+.employeeAddGrid input,
+.employeeAddGrid select,
+.employeeAddGrid button,
+.employeeDetailModal input,
+.employeeDetailModal select,
+.employeeDetailModal button{
+  height:38px !important;
+  min-height:38px !important;
+  box-sizing:border-box !important;
+  font-size:12px !important;
+  line-height:1 !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  white-space:nowrap !important;
+}
+.compactEmployeeTable select{
+  min-width:150px !important;
+  max-width:none !important;
+}
+.compactEmployeeTable td:nth-child(2) select{
+  min-width:190px !important;
+}
+.compactEmployeeTable td:nth-child(3) select{
+  min-width:105px !important;
+}
+.compactEmployeeTable td:nth-child(4) select{
+  min-width:105px !important;
+}
+.passwordManage,
+.currentPassword{
+  display:none !important;
+}
+.passwordEdit{
+  display:flex !important;
+  flex-direction:row !important;
+  align-items:center !important;
+  gap:8px !important;
+  flex-wrap:nowrap !important;
+  margin:0 !important;
+}
+.passwordEdit input{
+  min-width:125px !important;
+  width:125px !important;
+}
+.passwordEdit button{
+  min-width:112px !important;
+  padding:0 12px !important;
+}
+.compactEmployeeTable .primary,
+.compactEmployeeTable button{
+  padding:0 12px !important;
+  min-width:72px !important;
+}
+.employeeNameCell{
+  font-size:12px !important;
+  min-width:58px !important;
+}
+.employeeAddGrid{
+  grid-template-columns:1.1fr 1.4fr 1fr 1fr 1fr .9fr !important;
+  gap:8px !important;
+}
+.employeeAddGrid input,
+.employeeAddGrid select{
+  min-width:120px !important;
+}
+.employeeDetailModal{
+  max-width:1120px !important;
+  width:min(1120px, 94vw) !important;
+}
+.employeeDetailModal .formGrid.compact{
+  display:grid !important;
+  grid-template-columns:1fr 1fr 1fr !important;
+  gap:10px !important;
+  align-items:end !important;
+}
+.employeeDetailModal .formGrid.compact label{
+  font-size:12px !important;
+}
+.employeeDetailModal .formGrid.compact button{
+  width:100% !important;
+}
+.historyForm{
+  display:grid;
+  grid-template-columns:1.1fr .9fr 1.7fr .8fr;
+  gap:10px;
+  align-items:center;
+}
+.historyForm select,
+.historyForm input,
+.historyForm button{
+  width:100% !important;
+  min-width:0 !important;
+}
+.dateRangeBox{
+  display:grid;
+  grid-template-columns:1fr 24px 1fr;
+  gap:8px;
+  align-items:center;
+}
+.dateRangeBox span{
+  text-align:center;
+  font-weight:800;
+  font-size:15px;
+  line-height:38px;
+}
+.modalHead button{
+  height:38px !important;
+  min-width:64px !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+}
+.compactNav,
+.compactItems{
+  font-size:12px;
+}
+.compactNav button,
+.compactItems button{
+  height:36px;
+  min-height:36px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  white-space:nowrap;
+  line-height:1;
+}
+@media (max-width:900px){
+  .historyForm{
+    grid-template-columns:1fr;
+  }
+  .dateRangeBox{
+    grid-template-columns:1fr 24px 1fr;
+  }
+  .employeeDetailModal .formGrid.compact{
+    grid-template-columns:1fr !important;
+  }
+}

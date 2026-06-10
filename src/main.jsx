@@ -783,7 +783,7 @@ function Employees({ user }) {
         store_name: r.store_name || '',
         status: r.status || '재직',
         role: r.role || '직원',
-        password: ''
+        password: r.password || ''
       };
     });
     setDrafts(nextDrafts);
@@ -838,7 +838,7 @@ function Employees({ user }) {
       role: d.role || employee.role || '직원'
     };
 
-    if (d.password) patch.password = d.password;
+    if (d.password && d.password !== employee.password) patch.password = d.password;
     if (patch.status === '퇴사' && !employee.resign_date) patch.resign_date = todayLocalISO();
 
     if (!confirm(`${employee.name} 직원 정보를 최종 저장할까요?`)) return;
@@ -847,7 +847,7 @@ function Employees({ user }) {
     if (error) return alert(error.message);
 
     const detailParts = [formatAuditPatch(patch)];
-    if (d.password) detailParts.push('비밀번호: 변경됨');
+    if (d.password && d.password !== employee.password) detailParts.push('비밀번호: 변경됨');
     await writeAuditLog('직원최종저장', 'employee', employee.id, user, `대상: ${employee.name} / ${detailParts.join(' / ')}`);
     alert(`${employee.name} 직원 정보가 저장되었습니다.`);
     load();
@@ -931,12 +931,9 @@ function Employees({ user }) {
                     </select>
                   </td>
                   <td>
-                    <div className="passwordManage">
-                      <div className="currentPassword">현재: {r.password || '-'}</div>
-                      <div className="passwordEdit">
-                        <input value={d.password ?? ''} onChange={e=>setDraft(r.id,{password:e.target.value})} placeholder="새 비밀번호" disabled={r.status === '퇴사'} />
-                        <button onClick={() => resetPassword(r)} disabled={r.status === '퇴사'}>비밀번호 초기화</button>
-                      </div>
+                    <div className="passwordEdit">
+                      <input value={d.password ?? r.password ?? ''} onChange={e=>setDraft(r.id,{password:e.target.value})} placeholder="비밀번호" disabled={r.status === '퇴사'} />
+                      <button onClick={() => resetPassword(r)} disabled={r.status === '퇴사'}>비밀번호 초기화</button>
                     </div>
                   </td>
                   <td><button onClick={()=>setDetailTarget(r)}>상세</button></td>
@@ -1056,7 +1053,7 @@ function WorkHistoryInner({ employee, stores, user }) {
   return (
     <section>
       <h3>근무이력</h3>
-      <div className="formGrid compact">
+      <div className="historyForm">
         <select value={form.store_name} onChange={e=>setForm({...form,store_name:e.target.value})}>
           <option value="">매장 선택</option>
           {stores.filter(s => s.name !== '관리자').map(s => <option key={s.id || s.name} value={s.name}>{s.name}</option>)}
@@ -1067,8 +1064,11 @@ function WorkHistoryInner({ employee, stores, user }) {
           <option>검수자</option>
           <option>관리자</option>
         </select>
-        <input type="date" value={form.start_date} onChange={e=>setForm({...form,start_date:e.target.value})} />
-        <input type="date" value={form.end_date} onChange={e=>setForm({...form,end_date:e.target.value})} />
+        <div className="dateRangeBox">
+          <input type="date" value={form.start_date} onChange={e=>setForm({...form,start_date:e.target.value})} />
+          <span>~</span>
+          <input type="date" value={form.end_date} onChange={e=>setForm({...form,end_date:e.target.value})} />
+        </div>
         <button className="primary" onClick={addHistory} disabled={busy}>이력 추가</button>
       </div>
       <p className="muted">종료일을 비워두면 현재 근무중으로 표시됩니다.</p>
