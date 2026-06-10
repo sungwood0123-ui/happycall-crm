@@ -310,3 +310,91 @@ button:disabled{opacity:.55;cursor:not-allowed}
     grid-template-columns:1fr;
   }
 }
+
+/* V11.3 UI alignment fix */
+.compactNav{
+  gap:8px;
+  align-items:flex-start;
+}
+.compactItems{
+  align-items:center;
+}
+.employeeTableWrap{
+  max-width:100%;
+}
+.compactEmployeeTable{
+  table-layout:auto;
+  width:100%;
+}
+.compactEmployeeTable th,
+.compactEmployeeTable td{
+  vertical-align:middle !important;
+}
+.compactEmployeeTable select,
+.compactEmployeeTable input{
+  min-width:130px;
+  height:36px;
+  box-sizing:border-box;
+}
+.compactEmployeeTable td:nth-child(2) select{
+  min-width:170px;
+}
+.compactEmployeeTable td:nth-child(4) select{
+  min-width:95px;
+}
+.passwordManage{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:nowrap;
+}
+.currentPassword{
+  min-width:70px;
+  padding:8px 10px;
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  background:#f9fafb;
+  font-weight:700;
+  font-size:12px;
+  white-space:nowrap;
+}
+.passwordEdit{
+  display:flex !important;
+  flex-direction:row !important;
+  align-items:center !important;
+  gap:8px !important;
+  margin:0 !important;
+}
+.passwordEdit input{
+  min-width:150px !important;
+}
+.passwordEdit button{
+  height:36px;
+  white-space:nowrap;
+}
+.compactEmployeeTable .primary,
+.compactEmployeeTable button{
+  height:36px;
+  white-space:nowrap;
+}
+.employeeDetailModal .formGrid.compact{
+  grid-template-columns:repeat(3,minmax(150px,1fr));
+  align-items:end;
+}
+.employeeDetailModal .formGrid.compact select,
+.employeeDetailModal .formGrid.compact input{
+  min-width:150px;
+  width:100%;
+}
+.employeeDetailModal .formGrid.compact button{
+  height:38px;
+}
+@media (max-width:768px){
+  .passwordManage{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+  .employeeDetailModal .formGrid.compact{
+    grid-template-columns:1fr;
+  }
+}

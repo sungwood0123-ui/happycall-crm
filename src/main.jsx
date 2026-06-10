@@ -186,7 +186,7 @@ function PasswordChangeModal({ user, onClose, onUserUpdate }) {
 }
 
 function MainApp({ user, onLogout, onUserUpdate }) {
-  const [tab, setTab] = useState(user.role === '직원' ? 'mycalls' : 'dashboard');
+  const [tab, setTab] = useState('mycalls');
   const [showPassword, setShowPassword] = useState(false);
   const [openMenu, setOpenMenu] = useState('');
   const isAdmin = user.role === '관리자';
@@ -204,9 +204,9 @@ function MainApp({ user, onLogout, onUserUpdate }) {
       </header>
 
       <nav className="topNav compactNav">
-        {(isAdmin || isChecker || isManager) && <button className={tab==='dashboard'?'active':''} onClick={()=>setTab('dashboard')}>대시보드</button>}
         <button className={tab==='mycalls'?'active':''} onClick={()=>setTab('mycalls')}>내 해피콜</button>
-        {isAdmin && <button className={tab==='employees'?'active':''} onClick={()=>setTab('employees')}>직원관리</button>}
+        {isAdmin && <button className={tab==='rawupload'?'active':''} onClick={()=>setTab('rawupload')}>RAW 업로드</button>}
+        {isAdmin && <button className={tab==='targetgen'?'active':''} onClick={()=>setTab('targetgen')}>해피콜 생성</button>}
 
         {isManager && (
           <div className="compactGroup">
@@ -230,9 +230,8 @@ function MainApp({ user, onLogout, onUserUpdate }) {
             </button>
             {openMenu === 'ops' && (
               <div className="compactItems">
+                <button className={tab==='employees'?'active':''} onClick={()=>setTab('employees')}>직원관리</button>
                 <button className={tab==='stores'?'active':''} onClick={()=>setTab('stores')}>매장관리</button>
-                <button className={tab==='rawupload'?'active':''} onClick={()=>setTab('rawupload')}>RAW 업로드</button>
-                <button className={tab==='targetgen'?'active':''} onClick={()=>setTab('targetgen')}>해피콜 생성</button>
               </div>
             )}
           </div>
@@ -820,6 +819,17 @@ function Employees({ user }) {
     load();
   }
 
+  async function resetPassword(employee) {
+    if (!confirm(`${employee.name} 직원의 비밀번호를 1234로 초기화할까요?`)) return;
+
+    const { error } = await supabase.from('employees').update({ password: '1234' }).eq('id', employee.id);
+    if (error) return alert(error.message);
+
+    await writeAuditLog('비밀번호초기화', 'employee', employee.id, user, `대상: ${employee.name} / 1234 초기화`);
+    alert(`${employee.name} 비밀번호가 1234로 초기화되었습니다.`);
+    load();
+  }
+
   async function saveEmployee(employee) {
     const d = drafts[employee.id] || {};
     const patch = {
@@ -921,11 +931,13 @@ function Employees({ user }) {
                     </select>
                   </td>
                   <td>
-                    <div className="passwordEdit">
-                      <input value={d.password ?? ''} onChange={e=>setDraft(r.id,{password:e.target.value})} placeholder="새 비밀번호" disabled={r.status === '퇴사'} />
-                      <button onClick={()=>setDraft(r.id,{password:'1234'})} disabled={r.status === '퇴사'}>1234 입력</button>
+                    <div className="passwordManage">
+                      <div className="currentPassword">현재: {r.password || '-'}</div>
+                      <div className="passwordEdit">
+                        <input value={d.password ?? ''} onChange={e=>setDraft(r.id,{password:e.target.value})} placeholder="새 비밀번호" disabled={r.status === '퇴사'} />
+                        <button onClick={() => resetPassword(r)} disabled={r.status === '퇴사'}>비밀번호 초기화</button>
+                      </div>
                     </div>
-                    <p className="muted smallText">현재값은 보안상 표시하지 않음</p>
                   </td>
                   <td><button onClick={()=>setDetailTarget(r)}>상세</button></td>
                   <td><button className="primary" onClick={()=>saveEmployee(r)}>최종저장</button></td>
