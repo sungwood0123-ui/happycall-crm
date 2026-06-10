@@ -1384,8 +1384,6 @@ function TargetGenerator() {
 
     setBusy(true);
     try {
-      const { error: delErr } = await supabase.from('happycall_targets').delete().eq('target_date', targetDate);
-      if (delErr) throw delErr;
 
       for (let i = 0; i < summary.saveRows.length; i += 500) {
         const chunk = summary.saveRows.slice(i, i + 500);
