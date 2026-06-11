@@ -437,24 +437,39 @@ function UsageGuide({ user }) {
       items: [
         'RAW 업로드에서 엑셀을 분석하고 customers DB에 저장합니다.',
         '해피콜 생성에서 대상일 기준 대상자를 계산하고 저장합니다.',
-        '직원관리에서 재직/퇴사/권한/비밀번호를 관리합니다.',
+        '직원관리에서 재직/퇴사/권한/비밀번호/근무이력을 관리합니다.',
         '매장관리에서 운영/폐점/승계매장을 관리합니다.',
         '검수, 전체 해피콜, 직원별 현황, 감사로그를 확인합니다.'
       ]
     }
   };
 
-  const guide = guideMap[role] || guideMap.직원;
+  const hierarchy = {
+    직원: ['직원'],
+    검수자: ['검수자', '직원'],
+    점장: ['점장', '직원'],
+    관리자: ['관리자', '점장', '검수자', '직원']
+  };
+
+  const visibleRoles = hierarchy[role] || ['직원'];
 
   return (
     <div>
       <h2>사용방법</h2>
-      <div className="sectionCard guideFocus">
-        <h3>{guide.title}</h3>
-        <ol>
-          {guide.items.map((item, idx) => <li key={idx}>{item}</li>)}
-        </ol>
+      <div className="guideGrid roleGuideGrid">
+        {visibleRoles.map(r => {
+          const guide = guideMap[r];
+          return (
+            <section className="sectionCard guideFocus" key={r}>
+              <h3>{guide.title}</h3>
+              <ol>
+                {guide.items.map((item, idx) => <li key={idx}>{item}</li>)}
+              </ol>
+            </section>
+          );
+        })}
       </div>
+
       <div className="sectionCard">
         <h3>현재 로그인 권한</h3>
         <p><b>{user.name}</b> / {user.store_name} / {role}</p>

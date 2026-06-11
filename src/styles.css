@@ -964,3 +964,64 @@ select{
     width:100% !important;
   }
 }
+
+/* V13.1 login + guide UI fix */
+.loginBox,
+.loginCard,
+.authBox,
+.authCard{
+  display:flex !important;
+  flex-direction:column !important;
+  gap:14px !important;
+}
+.loginBox input,
+.loginBox select,
+.loginBox button,
+.loginCard input,
+.loginCard select,
+.loginCard button,
+.authBox input,
+.authBox select,
+.authBox button,
+.authCard input,
+.authCard select,
+.authCard button{
+  height:42px !important;
+  min-height:42px !important;
+  box-sizing:border-box !important;
+  font-size:13px !important;
+  line-height:1 !important;
+  display:flex !important;
+  align-items:center !important;
+}
+.loginBox button,
+.loginCard button,
+.authBox button,
+.authCard button{
+  justify-content:center !important;
+  font-weight:700 !important;
+}
+.loginBox h1,
+.loginBox h2,
+.loginCard h1,
+.loginCard h2,
+.authBox h1,
+.authBox h2,
+.authCard h1,
+.authCard h2{
+  margin-bottom:6px !important;
+}
+.roleGuideGrid{
+  display:grid !important;
+  grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)) !important;
+  gap:14px !important;
+}
+.roleGuideGrid .sectionCard{
+  height:100% !important;
+}
+.roleGuideGrid h3{
+  margin-top:0 !important;
+}
+.roleGuideGrid li{
+  line-height:1.45 !important;
+}
