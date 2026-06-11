@@ -1053,23 +1053,25 @@ function WorkHistoryInner({ employee, stores, user }) {
   return (
     <section>
       <h3>근무이력</h3>
-      <div className="historyForm">
-        <select className="historyStoreSelect" value={form.store_name} onChange={e=>setForm({...form,store_name:e.target.value})}>
-          <option value="">매장 선택</option>
-          {stores.filter(s => s.name !== '관리자').map(s => <option key={s.id || s.name} value={s.name}>{s.name}</option>)}
-        </select>
-        <select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>
-          <option>직원</option>
-          <option>점장</option>
-          <option>검수자</option>
-          <option>관리자</option>
-        </select>
-        <div className="dateRangeBox">
-          <input className="historyDateInput" type="date" value={form.start_date} onChange={e=>setForm({...form,start_date:e.target.value})} />
-          <span>~</span>
-          <input className="historyDateInput" type="date" value={form.end_date} onChange={e=>setForm({...form,end_date:e.target.value})} />
+      <div className="historyFormBalanced">
+        <div className="historyTopRow">
+          <select className="historyStoreSelect" value={form.store_name} onChange={e=>setForm({...form,store_name:e.target.value})}>
+            <option value="">매장 선택</option>
+            {stores.filter(s => s.name !== '관리자').map(s => <option key={s.id || s.name} value={s.name}>{s.name}</option>)}
+          </select>
+          <select className="historyRoleSelect" value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>
+            <option>직원</option>
+            <option>점장</option>
+            <option>검수자</option>
+            <option>관리자</option>
+          </select>
         </div>
-        <button className="primary historyAddBtn" onClick={addHistory} disabled={busy}>이력 추가</button>
+        <div className="historyDateRow">
+          <input className="historyDateInput" type="date" value={form.start_date} onChange={e=>setForm({...form,start_date:e.target.value})} />
+          <span className="dateTilde">~</span>
+          <input className="historyDateInput" type="date" value={form.end_date} onChange={e=>setForm({...form,end_date:e.target.value})} />
+          <button className="primary historyAddBtn" onClick={addHistory} disabled={busy}>이력 추가</button>
+        </div>
       </div>
       <p className="muted">종료일을 비워두면 현재 근무중으로 표시됩니다.</p>
 
