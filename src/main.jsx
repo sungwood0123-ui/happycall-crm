@@ -260,6 +260,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
             {openMenu === 'logs' && (
               <div className="compactItems">
                 <button className={tab==='audit'?'active':''} onClick={()=>setTab('audit')}>감사로그</button>
+                <button className={tab==='refused'?'active':''} onClick={()=>setTab('refused')}>통화거부 고객</button>
               </div>
             )}
           </div>
@@ -278,6 +279,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
         {tab === 'review' && <ReviewDashboard user={user} />}
         {tab === 'performance' && <EmployeePerformanceDashboard user={user} mode="all" />}
         {tab === 'audit' && <AuditLogsViewer />}
+        {tab === 'refused' && <RefusedCustomersViewer />}
         {tab === 'allcalls' && <CallList user={user} mode="all" />}
         {tab === 'employees' && <Employees user={user} />}
         {tab === 'stores' && <Stores user={user} />}
@@ -325,14 +327,16 @@ function diffDays(dateText, baseText = todayLocalISO()) {
 }
 function calculateCallStats(targets, latestLogByTarget, today = todayLocalISO()) {
   const total = targets.length;
-  const done = targets.filter(t => latestLogByTarget[t.id]).length;
-  const pending = total - done;
+  const isRejected = (t) => latestLogByTarget[t.id]?.review_status === '반려';
+  const isCompleted = (t) => latestLogByTarget[t.id] && !isRejected(t);
+  const done = targets.filter(isCompleted).length;
+  const rejected = targets.filter(isRejected).length;
+  const pending = targets.filter(t => !latestLogByTarget[t.id] || isRejected(t)).length;
   const todayTargets = targets.filter(t => t.target_date === today);
-  const todayDone = todayTargets.filter(t => latestLogByTarget[t.id]).length;
-  const overdueTargets = targets.filter(t => !latestLogByTarget[t.id] && diffDays(t.target_date, today) > 0);
+  const todayDone = todayTargets.filter(isCompleted).length;
+  const overdueTargets = targets.filter(t => (!latestLogByTarget[t.id] || isRejected(t)) && diffDays(t.target_date, today) > 0);
   const voc = targets.filter(t => latestLogByTarget[t.id]?.call_detail === '불만사항있음').length;
   const absent = targets.filter(t => latestLogByTarget[t.id]?.call_result === '부재중').length;
-  const rejected = targets.filter(t => latestLogByTarget[t.id]?.call_result === '통화거부').length;
   return { total, done, pending, rate: total ? Math.round(done/total*1000)/10 : 0,
     todayTotal: todayTargets.length, todayDone, todayPending: todayTargets.length - todayDone,
     todayRate: todayTargets.length ? Math.round(todayDone/todayTargets.length*1000)/10 : 0,
@@ -570,7 +574,10 @@ function CallList({ user, mode, readOnly = false }) {
 
   const latestLogByTarget = useMemo(() => {
     const map = {};
-    logs.forEach(l => { if (!map[l.target_id]) map[l.target_id] = l; });
+    logs.forEach(l => {
+      const prev = map[l.target_id];
+      if (!prev || String(l.checked_at || '') > String(prev.checked_at || '')) map[l.target_id] = l;
+    });
     return map;
   }, [logs]);
 
@@ -694,6 +701,16 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
       const { error } = await supabase.from('happycall_logs').insert(payload);
       if (error) throw error;
 
+      if (result === '통화거부' || detail === '통화거부') {
+        await supabase.from('refused_customers').upsert({
+          join_no: target.join_no,
+          target_id: target.id,
+          refused_by: user.name,
+          refused_at: new Date().toISOString(),
+          memo: memo || '통화거부'
+        }, { onConflict: 'join_no' });
+      }
+
       if (typeof rejectedInfo !== 'undefined' && rejectedInfo?.id) {
         await supabase.from('happycall_logs').update({
           review_status: '재처리완료'
@@ -769,6 +786,83 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
 }
 
 
+
+function ReviewStorePermissionsModal({ employee, stores, user, onClose }) {
+  const [allowed, setAllowed] = useState(new Set());
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { load(); }, [employee.id]);
+
+  async function load() {
+    const { data, error } = await supabase
+      .from('reviewer_store_permissions')
+      .select('*')
+      .eq('employee_id', employee.id);
+
+    if (error) return alert('검수매장 조회 오류: ' + error.message);
+    setAllowed(new Set((data || []).map(r => r.store_name)));
+  }
+
+  function toggle(storeName) {
+    setAllowed(prev => {
+      const next = new Set(prev);
+      if (next.has(storeName)) next.delete(storeName);
+      else next.add(storeName);
+      return next;
+    });
+  }
+
+  async function save() {
+    setBusy(true);
+    try {
+      const { error: delError } = await supabase
+        .from('reviewer_store_permissions')
+        .delete()
+        .eq('employee_id', employee.id);
+      if (delError) throw delError;
+
+      const rows = Array.from(allowed).map(storeName => ({
+        employee_id: employee.id,
+        employee_name: employee.name,
+        store_name: storeName
+      }));
+
+      if (rows.length) {
+        const { error: insError } = await supabase.from('reviewer_store_permissions').insert(rows);
+        if (insError) throw insError;
+      }
+
+      await writeAuditLog('검수매장설정', 'reviewer_store_permissions', employee.id, user, `${employee.name} / ${rows.map(r => r.store_name).join(', ') || '없음'}`);
+      alert('검수 매장 권한이 저장되었습니다.');
+      onClose();
+    } catch (e) {
+      alert('검수매장 저장 오류: ' + e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const storeList = (stores || []).filter(s => s.name !== '관리자' && s.status !== '폐점');
+
+  return (
+    <div className="modalBg">
+      <div className="modal reviewStoreModal">
+        <div className="modalHead"><h2>{employee.name} 검수 매장 설정</h2><button onClick={onClose}>닫기</button></div>
+        <p className="muted">선택한 매장 건만 해당 검수자 검수 화면에 표시됩니다.</p>
+        <div className="storePermissionGrid">
+          {storeList.map(s => (
+            <label key={s.id || s.name} className={allowed.has(s.name) ? 'storePermission active' : 'storePermission'}>
+              <input type="checkbox" checked={allowed.has(s.name)} onChange={() => toggle(s.name)} />
+              <span>{s.name}</span>
+            </label>
+          ))}
+        </div>
+        <button className="primary" onClick={save} disabled={busy}>검수 매장 저장</button>
+      </div>
+    </div>
+  );
+}
+
 function Employees({ user }) {
   const [rows, setRows] = useState([]);
   const [storeOptions, setStoreOptions] = useState([]);
@@ -776,6 +870,7 @@ function Employees({ user }) {
   const [viewStatus, setViewStatus] = useState('재직');
   const [drafts, setDrafts] = useState({});
   const [detailTarget, setDetailTarget] = useState(null);
+  const [reviewStoreTarget, setReviewStoreTarget] = useState(null);
 
   useEffect(() => { load(); }, []);
 
@@ -920,6 +1015,7 @@ function Employees({ user }) {
               <th>권한</th>
               <th>비밀번호 관리</th>
               <th>상세</th>
+              <th>검수매장</th>
               <th>최종저장</th>
             </tr>
           </thead>
@@ -952,6 +1048,7 @@ function Employees({ user }) {
                     </div>
                   </td>
                   <td><button onClick={()=>setDetailTarget(r)}>상세</button></td>
+                  <td>{(d.role ?? r.role) === '검수자' || (d.role ?? r.role) === '관리자' ? <button onClick={()=>setReviewStoreTarget(r)}>설정</button> : <span className="muted">-</span>}</td>
                   <td><button className="primary" onClick={()=>saveEmployee(r)}>최종저장</button></td>
                 </tr>
               );
@@ -963,6 +1060,7 @@ function Employees({ user }) {
       <p className="muted">입사일, 퇴사일, 근무이력은 상세 버튼에서 관리합니다. 퇴사자는 로그인할 수 없습니다.</p>
       {storeOptions.length <= 1 && <p className="error">운영 매장 목록이 없습니다. 먼저 매장관리에서 매장을 등록해주세요.</p>}
       {detailTarget && <EmployeeDetailModal employee={detailTarget} stores={storeOptions} user={user} onClose={()=>setDetailTarget(null)} onUpdated={load} />}
+      {reviewStoreTarget && <ReviewStorePermissionsModal employee={reviewStoreTarget} stores={storeOptions} user={user} onClose={()=>setReviewStoreTarget(null)} />}
     </div>
   );
 }
@@ -1130,6 +1228,46 @@ function WorkHistoryInner({ employee, stores, user }) {
         </tbody>
       </table>
     </section>
+  );
+}
+
+
+function RefusedCustomersViewer() {
+  const [rows, setRows] = useState([]);
+
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    try {
+      const data = await fetchAllRows('refused_customers', '*', 'refused_at');
+      setRows((data || []).sort((a,b)=>String(b.refused_at || '').localeCompare(String(a.refused_at || ''))));
+    } catch (e) {
+      alert('통화거부 고객 조회 오류: ' + e.message);
+    }
+  }
+
+  return (
+    <div>
+      <h2>통화거부 고객</h2>
+      <div className="sectionCard">
+        <table>
+          <thead>
+            <tr><th>가입번호</th><th>거부일시</th><th>처리자</th><th>메모</th></tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.id || r.join_no}>
+                <td>{r.join_no}</td>
+                <td>{String(r.refused_at || '').slice(0,19).replace('T',' ')}</td>
+                <td>{r.refused_by || '-'}</td>
+                <td>{r.memo || '-'}</td>
+              </tr>
+            ))}
+            {!rows.length && <tr><td colSpan="4" className="muted">통화거부 고객이 없습니다.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -1303,7 +1441,19 @@ function ReviewDashboard({ user }) {
     try {
       const allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
       const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
-      setTargets((allTargets || []).filter(t => !t.is_skipped));
+
+      let visibleTargets = (allTargets || []).filter(t => !t.is_skipped);
+      if (user.role === '검수자') {
+        const { data: permissions, error: permError } = await supabase
+          .from('reviewer_store_permissions')
+          .select('*')
+          .eq('employee_id', user.id);
+        if (permError) throw permError;
+        const allowedStores = new Set((permissions || []).map(p => p.store_name));
+        visibleTargets = visibleTargets.filter(t => allowedStores.has(t.assigned_store));
+      }
+
+      setTargets(visibleTargets);
       setLogs(allLogs || []);
     } catch (e) {
       alert('검수 목록 조회 오류: ' + e.message);
@@ -1994,12 +2144,13 @@ function TargetGenerator({ user }) {
     setPreview([]);
 
     try {
-      const [customers, employees, stores, histories, employeeHistories] = await Promise.all([
+      const [customers, employees, stores, histories, employeeHistories, refusedRows] = await Promise.all([
         fetchAllRows('customers', '*', 'open_date'),
         fetchAllRows('employees', '*', 'name'),
         fetchAllRows('stores', '*', 'name'),
         fetchAllRows('assignment_history', '*', 'updated_at'),
-        fetchAllRows('employee_store_history', '*', 'start_date')
+        fetchAllRows('employee_store_history', '*', 'start_date'),
+        fetchAllRows('refused_customers', '*', 'refused_at')
       ]);
 
       const activeEmployees = (employees || []).filter(e => e.status === '재직' && e.store_name !== '관리자');
@@ -2013,6 +2164,8 @@ function TargetGenerator({ user }) {
 
       const historyMap = {};
       (histories || []).forEach(h => historyMap[h.join_no] = h);
+
+      const refusedJoinNos = new Set((refusedRows || []).map(r => String(r.join_no || '')));
 
       const plusMap = [
         { days: 1, type: 'D_PLUS_1' },
@@ -2030,6 +2183,7 @@ function TargetGenerator({ user }) {
 
       (customers || []).forEach(c => {
         if (!c.open_date || !c.join_no) return;
+        if (refusedJoinNos.has(String(c.join_no))) return;
 
         plusMap.forEach(p => {
           const plusDate = addDays(c.open_date, p.days);
@@ -2058,6 +2212,7 @@ function TargetGenerator({ user }) {
       const counter = {};
       (customers || []).forEach(c => {
         if (!c.open_date || !c.join_no) return;
+        if (refusedJoinNos.has(String(c.join_no))) return;
         if (dayOfMonth(c.open_date) !== targetDay) return;
         if (dPlusJoinNosThisMonth.has(c.join_no)) return;
 
@@ -2172,6 +2327,7 @@ function TargetGenerator({ user }) {
         <p className="muted">대상일 기준으로 D+1, D+7, D+13, D+95, D+185와 월간 정기 해피콜을 생성합니다.</p>
         <p className="muted">D+95/D+185는 판매자 재직 시 본인 배정, 판매자 퇴사 시 근무이력 기준 당시 점장 또는 현재 매장 점장에게 배정됩니다.</p>
         <p className="muted">당월 D+ 해피콜이 있는 고객은 해당 월의 월간 정기 해피콜에서 제외됩니다.</p>
+        <p className="muted">통화거부 고객은 이후 해피콜 생성 대상에서 제외됩니다.</p>
 
         <div className="formGrid compact">
           <input type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} />

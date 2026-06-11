@@ -1141,3 +1141,36 @@ select{
     line-height:1.15 !important;
   }
 }
+
+/* V14 reviewer permissions + refusal */
+.reviewStoreModal{
+  max-width:720px !important;
+}
+.storePermissionGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(120px, 1fr));
+  gap:10px;
+  margin:14px 0;
+}
+.storePermission{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-height:42px;
+  padding:0 12px;
+  border:1px solid #e5e7eb;
+  border-radius:12px;
+  background:#fff;
+  font-size:13px;
+  font-weight:700;
+  cursor:pointer;
+}
+.storePermission.active{
+  border-color:#2563eb;
+  background:#eff6ff;
+  color:#1d4ed8;
+}
+.storePermission input{
+  width:16px;
+  height:16px;
+}
