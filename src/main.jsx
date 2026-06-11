@@ -325,6 +325,27 @@ function diffDays(dateText, baseText = todayLocalISO()) {
   const b = new Date(String(baseText).slice(0, 10) + 'T00:00:00');
   return Math.floor((b - a) / 86400000);
 }
+
+function formatKST(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value).slice(0, 19).replace('T', ' ');
+  const parts = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(d).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
 function calculateCallStats(targets, latestLogByTarget, today = todayLocalISO()) {
   const total = targets.length;
   const isRejected = (t) => latestLogByTarget[t.id]?.review_status === '반려';
@@ -393,7 +414,7 @@ function LastAuditNotice({ action, label }) {
       <b>{label}</b><br />
       {item ? (
         <>
-          <span>{String(item.created_at || '').slice(0, 19).replace('T', ' ')}</span>
+          <span>{formatKST(item.created_at)}</span>
           <span> / 작업자: {item.actor_name || '-'}</span>
           {item.detail && <p>{item.detail}</p>}
         </>
@@ -1252,13 +1273,13 @@ function RefusedCustomersViewer() {
       <div className="sectionCard">
         <table>
           <thead>
-            <tr><th>가입번호</th><th>거부일시</th><th>처리자</th><th>메모</th></tr>
+            <tr><th>가입번호</th><th>거부일시(KST)</th><th>처리자</th><th>메모</th></tr>
           </thead>
           <tbody>
             {rows.map(r => (
               <tr key={r.id || r.join_no}>
                 <td>{r.join_no}</td>
-                <td>{String(r.refused_at || '').slice(0,19).replace('T',' ')}</td>
+                <td>{formatKST(r.refused_at)}</td>
                 <td>{r.refused_by || '-'}</td>
                 <td>{r.memo || '-'}</td>
               </tr>
@@ -1291,12 +1312,12 @@ function AuditLogsViewer() {
       <div className="sectionCard">
         <table>
           <thead>
-            <tr><th>일시</th><th>작업자</th><th>작업</th><th>상세</th></tr>
+            <tr><th>일시(KST)</th><th>작업자</th><th>작업</th><th>상세</th></tr>
           </thead>
           <tbody>
             {logs.map(l => (
               <tr key={l.id}>
-                <td>{String(l.created_at || '').slice(0, 19).replace('T', ' ')}</td>
+                <td>{formatKST(l.created_at)}</td>
                 <td>{l.actor_name}</td>
                 <td>{l.action}</td>
                 <td>{l.detail || `${l.target_type || ''} ${l.target_id || ''}`}</td>
