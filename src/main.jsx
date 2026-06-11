@@ -4,6 +4,8 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
+const APP_BUILD_VERSION = 'v16.1-20260611095930';
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '');
@@ -191,6 +193,92 @@ function PasswordChangeModal({ user, onClose, onUserUpdate }) {
 }
 
 
+
+async function saveErrorReport({ user, currentTab = '', actionName = '', joinNo = '', error }) {
+  const message = error?.message || String(error || '알 수 없는 오류');
+  try {
+    await supabase.from('error_reports').insert({
+      reporter_name: user?.name || '',
+      reporter_role: user?.role || '',
+      reporter_store: user?.store_name || '',
+      current_tab: currentTab || '',
+      action_name: actionName || '',
+      join_no: joinNo || '',
+      error_message: message,
+      user_agent: navigator.userAgent,
+      status: '접수'
+    });
+    alert('오류 보고가 접수되었습니다.');
+  } catch (e) {
+    alert('오류 보고 저장 실패: ' + e.message);
+  }
+}
+
+function askErrorReport({ user, currentTab = '', actionName = '', joinNo = '', error }) {
+  const message = error?.message || String(error || '알 수 없는 오류');
+  const ok = confirm(`오류가 발생했습니다.\n\n${message}\n\n이 오류를 관리자에게 보고할까요?`);
+  if (ok) saveErrorReport({ user, currentTab, actionName, joinNo, error });
+}
+
+
+function UpdateNotice() {
+  const [hasUpdate, setHasUpdate] = useState(false);
+  const [nextVersion, setNextVersion] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+
+    async function checkVersion() {
+      try {
+        const res = await fetch(`/version.json?ts=${Date.now()}`, {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!alive) return;
+        if (data.version && data.version !== APP_BUILD_VERSION) {
+          setNextVersion(data.version);
+          setHasUpdate(true);
+        }
+      } catch (e) {
+        // 버전 확인 실패는 사용자 작업을 막지 않음
+      }
+    }
+
+    checkVersion();
+    const timer = setInterval(checkVersion, 60 * 1000);
+
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  function forceRefresh() {
+    if ('caches' in window) {
+      caches.keys().then(keys => Promise.all(keys.map(key => caches.delete(key)))).finally(() => {
+        window.location.reload(true);
+      });
+    } else {
+      window.location.reload(true);
+    }
+  }
+
+  if (!hasUpdate) return null;
+
+  return (
+    <div className="updateNoticeBg">
+      <div className="updateNoticeBox">
+        <h2>업데이트 내용이 있습니다</h2>
+        <p>새로운 버전이 배포되었습니다. 최신 기능과 오류 수정을 반영하려면 새로고침이 필요합니다.</p>
+        <p className="muted">현재 버전: {APP_BUILD_VERSION}<br />최신 버전: {nextVersion}</p>
+        <button className="primary" onClick={forceRefresh}>강제 새로고침</button>
+      </div>
+    </div>
+  );
+}
+
 function AutoLogoutGuard({ onLogout }) {
   useEffect(() => {
     const TIMEOUT_MS = 60 * 60 * 1000;
@@ -236,6 +324,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
   return (
     <div className="app">
       <AutoLogoutGuard onLogout={onLogout} />
+      <UpdateNotice />
       <header>
         <div>
           <h1>세찬 해피콜 관리시스템</h1>
@@ -302,6 +391,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
               <div className="compactItems">
                 <button className={tab==='audit'?'active':''} onClick={()=>setTab('audit')}>감사로그</button>
                 <button className={tab==='refused'?'active':''} onClick={()=>setTab('refused')}>통화 불가 고객</button>
+                <button className={tab==='errors'?'active':''} onClick={()=>setTab('errors')}>오류보고</button>
               </div>
             )}
           </div>
@@ -321,6 +411,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
         {tab === 'performance' && <EmployeePerformanceDashboard user={user} mode="all" />}
         {tab === 'audit' && <AuditLogsViewer />}
         {tab === 'refused' && <RefusedCustomersViewer />}
+        {tab === 'errors' && <ErrorReportsViewer user={user} />}
         {tab === 'allcalls' && <CallList user={user} mode="all" />}
         {tab === 'employees' && <Employees user={user} />}
         {tab === 'stores' && <Stores user={user} />}
@@ -793,7 +884,7 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
       onSaved();
       onClose();
     } catch (e) {
-      alert('저장 오류: ' + e.message);
+      askErrorReport({ user, currentTab: '해피콜 상세', actionName: '해피콜 저장', joinNo: target.join_no, error: e });
     }
   }
 
@@ -1343,6 +1434,88 @@ function maskSensitiveAuditDetail(detail) {
   return text;
 }
 
+
+function ErrorReportsViewer({ user }) {
+  const [rows, setRows] = useState([]);
+  const [statusFilter, setStatusFilter] = useState('전체');
+  const [keyword, setKeyword] = useState('');
+
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    try {
+      const data = await fetchAllRows('error_reports', '*', 'created_at');
+      setRows((data || []).sort((a,b)=>String(b.created_at || '').localeCompare(String(a.created_at || ''))));
+    } catch (e) {
+      alert('오류보고 조회 오류: ' + e.message);
+    }
+  }
+
+  async function updateStatus(row, status) {
+    const { error } = await supabase.from('error_reports').update({ status }).eq('id', row.id);
+    if (error) return alert(error.message);
+    await writeAuditLog('오류보고상태변경', 'error_reports', row.id, user, `${row.reporter_name} / ${status}`);
+    load();
+  }
+
+  const filtered = useMemo(() => {
+    const q = keyword.trim().toLowerCase();
+    return rows.filter(r => {
+      if (statusFilter !== '전체' && (r.status || '접수') !== statusFilter) return false;
+      if (!q) return true;
+      return `${r.reporter_name || ''} ${r.reporter_role || ''} ${r.reporter_store || ''} ${r.action_name || ''} ${r.join_no || ''} ${r.error_message || ''}`.toLowerCase().includes(q);
+    });
+  }, [rows, statusFilter, keyword]);
+
+  return (
+    <div>
+      <h2>오류보고</h2>
+      <div className="sectionCard errorFilterBox">
+        <select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
+          <option>전체</option>
+          <option>접수</option>
+          <option>확인중</option>
+          <option>해결완료</option>
+          <option>보류</option>
+        </select>
+        <input placeholder="작업자/작업/가입번호/오류 검색" value={keyword} onChange={e=>setKeyword(e.target.value)} />
+        <button onClick={() => { setStatusFilter('전체'); setKeyword(''); }}>초기화</button>
+      </div>
+      <div className="sectionCard">
+        <table>
+          <thead>
+            <tr>
+              <th>일시(KST)</th><th>보고자</th><th>권한</th><th>매장</th><th>작업</th><th>가입번호</th><th>오류내용</th><th>상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(r => (
+              <tr key={r.id}>
+                <td>{formatKST(r.created_at)}</td>
+                <td>{r.reporter_name}</td>
+                <td>{r.reporter_role}</td>
+                <td>{r.reporter_store}</td>
+                <td>{r.action_name}</td>
+                <td>{r.join_no || '-'}</td>
+                <td className="errorMessageCell">{r.error_message}</td>
+                <td>
+                  <select value={r.status || '접수'} onChange={e=>updateStatus(r, e.target.value)}>
+                    <option>접수</option>
+                    <option>확인중</option>
+                    <option>해결완료</option>
+                    <option>보류</option>
+                  </select>
+                </td>
+              </tr>
+            ))}
+            {!filtered.length && <tr><td colSpan="8" className="muted">오류보고가 없습니다.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function AuditLogsViewer() {
   const [logs, setLogs] = useState([]);
   const [actorFilter, setActorFilter] = useState('전체');
@@ -1533,6 +1706,9 @@ function ReviewDashboard({ user }) {
   const [logs, setLogs] = useState([]);
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState('검수대기');
+  const [employeeFilter, setEmployeeFilter] = useState('전체');
+  const [storeFilter, setStoreFilter] = useState('전체');
+  const [keyword, setKeyword] = useState('');
 
   useEffect(() => { load(); }, []);
 
@@ -1555,7 +1731,7 @@ function ReviewDashboard({ user }) {
       setTargets(visibleTargets);
       setLogs(allLogs || []);
     } catch (e) {
-      alert('검수 목록 조회 오류: ' + e.message);
+      askErrorReport({ user, currentTab: '검수', actionName: '검수 목록 조회', error: e });
     }
   }
 
@@ -1565,27 +1741,38 @@ function ReviewDashboard({ user }) {
     return map;
   }, [targets]);
 
-  const reviewRows = useMemo(() => {
-    let rows = logs.map(log => ({
+  const baseRows = useMemo(() => {
+    return logs.map(log => ({
       log,
       target: targetById[log.target_id]
     })).filter(r => r.target);
+  }, [logs, targetById]);
 
-    if (filter !== '전체') {
-      rows = rows.filter(r => (r.log.review_status || '검수대기') === filter);
+  const employees = useMemo(() => ['전체', ...Array.from(new Set(baseRows.map(r => r.target.assigned_employee).filter(Boolean))).sort((a,b)=>String(a).localeCompare(String(b), 'ko'))], [baseRows]);
+  const stores = useMemo(() => ['전체', ...Array.from(new Set(baseRows.map(r => r.target.assigned_store).filter(Boolean))).sort((a,b)=>String(a).localeCompare(String(b), 'ko'))], [baseRows]);
+
+  const reviewRows = useMemo(() => {
+    const q = keyword.trim().toLowerCase();
+    let rows = [...baseRows];
+
+    if (filter !== '전체') rows = rows.filter(r => (r.log.review_status || '검수대기') === filter);
+    if (employeeFilter !== '전체') rows = rows.filter(r => r.target.assigned_employee === employeeFilter);
+    if (storeFilter !== '전체') rows = rows.filter(r => r.target.assigned_store === storeFilter);
+    if (q) {
+      rows = rows.filter(r => `${r.target.join_no || ''} ${r.target.assigned_employee || ''} ${r.target.assigned_store || ''} ${r.log.call_result || ''} ${r.log.call_detail || ''} ${r.log.memo || ''}`.toLowerCase().includes(q));
     }
 
     rows.sort((a, b) => String(b.log.checked_at || '').localeCompare(String(a.log.checked_at || '')));
     return rows;
-  }, [logs, targetById, filter]);
+  }, [baseRows, filter, employeeFilter, storeFilter, keyword]);
 
   const stats = useMemo(() => {
-    const total = logs.length;
-    const pending = logs.filter(l => (l.review_status || '검수대기') === '검수대기').length;
-    const approved = logs.filter(l => l.review_status === '검수완료').length;
-    const rejected = logs.filter(l => l.review_status === '반려').length;
+    const total = baseRows.length;
+    const pending = baseRows.filter(r => (r.log.review_status || '검수대기') === '검수대기').length;
+    const approved = baseRows.filter(r => r.log.review_status === '검수완료').length;
+    const rejected = baseRows.filter(r => r.log.review_status === '반려').length;
     return { total, pending, approved, rejected };
-  }, [logs]);
+  }, [baseRows]);
 
   return (
     <div>
@@ -1605,6 +1792,17 @@ function ReviewDashboard({ user }) {
         <button className={filter==='전체'?'active':''} onClick={()=>setFilter('전체')}>전체 {stats.total}</button>
       </div>
 
+      <div className="sectionCard reviewFilterBox">
+        <select value={employeeFilter} onChange={e=>setEmployeeFilter(e.target.value)}>
+          {employees.map(v => <option key={v}>{v}</option>)}
+        </select>
+        <select value={storeFilter} onChange={e=>setStoreFilter(e.target.value)}>
+          {stores.map(v => <option key={v}>{v}</option>)}
+        </select>
+        <input placeholder="가입번호/담당자/메모 검색" value={keyword} onChange={e=>setKeyword(e.target.value)} />
+        <button onClick={() => { setEmployeeFilter('전체'); setStoreFilter('전체'); setKeyword(''); }}>필터 초기화</button>
+      </div>
+
       <div className="sectionCard">
         <table>
           <thead>
@@ -1615,21 +1813,24 @@ function ReviewDashboard({ user }) {
               <th>결과</th>
               <th>메모</th>
               <th>검수상태</th>
+              <th>완료일시(KST)</th>
               <th>대상일</th>
             </tr>
           </thead>
           <tbody>
             {reviewRows.map(({log, target}) => (
-              <tr key={log.id} className="clickableRow" onClick={()=>setSelected({log, target})}>
+              <tr key={log.id} className="clickableRow" onClick={()=>setSelected({log, target, allLogs: logs})}>
                 <td>{target.join_no}</td>
                 <td>{target.assigned_employee}</td>
                 <td>{target.assigned_store}</td>
                 <td>{log.call_result} / {log.call_detail}</td>
                 <td>{log.memo ? '있음' : '-'}</td>
                 <td>{log.review_status || '검수대기'}</td>
+                <td>{formatKST(log.checked_at)}</td>
                 <td>{target.target_date}</td>
               </tr>
             ))}
+            {!reviewRows.length && <tr><td colSpan="8" className="muted">조건에 맞는 검수 건이 없습니다.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1640,9 +1841,17 @@ function ReviewDashboard({ user }) {
 }
 
 function ReviewModal({ item, user, onClose, onSaved }) {
-  const { log, target } = item;
+  const { log, target, allLogs = [] } = item;
   const [memo, setMemo] = useState(log.review_memo || '');
   const [busy, setBusy] = useState(false);
+
+  const relatedLogs = useMemo(() => {
+    return (allLogs || [])
+      .filter(l => l.target_id === log.target_id)
+      .sort((a,b)=>String(b.checked_at || '').localeCompare(String(a.checked_at || '')));
+  }, [allLogs, log.target_id]);
+
+  const rejectionHistory = relatedLogs.filter(l => l.review_status === '반려' || l.review_memo);
 
   async function approve() {
     if (!confirm('검수 승인할까요?')) return;
@@ -1663,7 +1872,7 @@ function ReviewModal({ item, user, onClose, onSaved }) {
       onSaved();
       onClose();
     } catch (e) {
-      alert('검수 승인 오류: ' + e.message);
+      askErrorReport({ user, currentTab: '검수 상세', actionName: '검수 승인', joinNo: target.join_no, error: e });
     } finally {
       setBusy(false);
     }
@@ -1689,7 +1898,7 @@ function ReviewModal({ item, user, onClose, onSaved }) {
       onSaved();
       onClose();
     } catch (e) {
-      alert('반려 처리 오류: ' + e.message);
+      askErrorReport({ user, currentTab: '검수 상세', actionName: '검수 반려', joinNo: target.join_no, error: e });
     } finally {
       setBusy(false);
     }
@@ -1710,6 +1919,8 @@ function ReviewModal({ item, user, onClose, onSaved }) {
             <p><b>담당자</b><br />{target.assigned_employee}</p>
             <p><b>매장</b><br />{target.assigned_store}</p>
             <p><b>대상일</b><br />{target.target_date}</p>
+            <p><b>완료일시</b><br />{formatKST(log.checked_at)}</p>
+            <p><b>검수일시</b><br />{log.reviewed_at ? formatKST(log.reviewed_at) : '-'}</p>
           </div>
         </section>
 
@@ -1718,6 +1929,21 @@ function ReviewModal({ item, user, onClose, onSaved }) {
           <p><b>{log.call_result}</b> / {log.call_detail}</p>
           <p className="reason">{log.memo || '메모 없음'}</p>
         </section>
+
+        {rejectionHistory.length > 0 && (
+          <section>
+            <h3>반려/검수 이력</h3>
+            <div className="reviewHistoryList">
+              {rejectionHistory.map(h => (
+                <div className="reviewHistoryItem" key={h.id}>
+                  <b>{h.review_status || '검수대기'}</b>
+                  <span>{h.reviewed_at ? formatKST(h.reviewed_at) : formatKST(h.checked_at)}</span>
+                  <p>{h.review_memo || h.memo || '메모 없음'}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section>
           <h3>검수 메모 / 반려 사유</h3>
@@ -1731,7 +1957,6 @@ function ReviewModal({ item, user, onClose, onSaved }) {
     </div>
   );
 }
-
 
 function RawUpload({ user }) {
   const [fileName, setFileName] = useState('');
