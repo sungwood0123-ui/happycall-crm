@@ -829,3 +829,138 @@ select{
     width:100% !important;
   }
 }
+
+/* V12 근무이력 한 줄 입력 + 수정 기능 UI */
+.historyFormBalanced,
+.historyTopRow,
+.historyDateRow{
+  display:none !important;
+}
+.historyFormSingle{
+  display:grid !important;
+  grid-template-columns:140px 120px 135px 20px 135px 120px 72px !important;
+  gap:8px !important;
+  align-items:center !important;
+  width:100% !important;
+  max-width:790px !important;
+}
+.historyFormSingle select,
+.historyFormSingle input,
+.historyFormSingle button{
+  height:38px !important;
+  min-height:38px !important;
+  max-height:38px !important;
+  box-sizing:border-box !important;
+  font-size:12px !important;
+  line-height:1 !important;
+  white-space:nowrap !important;
+  margin:0 !important;
+}
+.historyFormSingle select,
+.historyFormSingle input{
+  width:100% !important;
+  min-width:0 !important;
+  padding:0 10px !important;
+}
+.historyStoreSelect{
+  width:140px !important;
+  min-width:140px !important;
+}
+.historyRoleSelect{
+  width:120px !important;
+  min-width:120px !important;
+}
+.historyDateInput{
+  width:135px !important;
+  min-width:135px !important;
+}
+.dateTilde{
+  display:inline-flex !important;
+  width:20px !important;
+  min-width:20px !important;
+  height:38px !important;
+  align-items:center !important;
+  justify-content:center !important;
+  line-height:1 !important;
+  font-size:14px !important;
+  font-weight:800 !important;
+  margin:0 !important;
+}
+.historySaveBtn{
+  width:120px !important;
+  min-width:120px !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  padding:0 10px !important;
+}
+.historyCancelBtn{
+  width:72px !important;
+  min-width:72px !important;
+  border:1px solid #e5e7eb !important;
+  background:#f3f4f6 !important;
+  color:#111827 !important;
+  border-radius:10px !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  padding:0 10px !important;
+}
+.historyTable th,
+.historyTable td{
+  white-space:nowrap !important;
+  vertical-align:middle !important;
+}
+.historyRowActions{
+  display:flex !important;
+  gap:6px !important;
+  align-items:center !important;
+}
+.historyRowActions button{
+  height:32px !important;
+  min-height:32px !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  padding:0 10px !important;
+  font-size:12px !important;
+  line-height:1 !important;
+  white-space:nowrap !important;
+}
+
+/* 직원관리 메인 드롭다운 폭 균형 */
+.compactEmployeeTable td:nth-child(2) select{
+  min-width:140px !important;
+  width:140px !important;
+}
+.compactEmployeeTable td:nth-child(3) select{
+  min-width:90px !important;
+  width:90px !important;
+}
+.compactEmployeeTable td:nth-child(4) select{
+  min-width:105px !important;
+  width:105px !important;
+}
+.compactEmployeeTable select,
+.compactEmployeeTable input,
+.compactEmployeeTable button{
+  font-size:12px !important;
+  white-space:nowrap !important;
+}
+@media (max-width:900px){
+  .historyFormSingle{
+    grid-template-columns:1fr !important;
+    max-width:100% !important;
+  }
+  .historyStoreSelect,
+  .historyRoleSelect,
+  .historyDateInput,
+  .historySaveBtn,
+  .historyCancelBtn{
+    width:100% !important;
+    min-width:0 !important;
+  }
+  .dateTilde{
+    width:100% !important;
+  }
+}

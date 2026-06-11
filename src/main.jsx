@@ -997,6 +997,7 @@ function WorkHistoryInner({ employee, stores, user }) {
   const [rows, setRows] = useState([]);
   const [form, setForm] = useState({ store_name: employee.store_name || '', role: employee.role || '직원', start_date: '', end_date: '' });
   const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState(null);
 
   useEffect(() => { load(); }, [employee.id]);
 
@@ -1011,7 +1012,12 @@ function WorkHistoryInner({ employee, stores, user }) {
     setRows(data || []);
   }
 
-  async function addHistory() {
+  function resetForm() {
+    setEditingId(null);
+    setForm({ store_name: employee.store_name || '', role: employee.role || '직원', start_date: '', end_date: '' });
+  }
+
+  async function saveHistory() {
     if (!form.store_name) return alert('매장을 선택해주세요.');
     if (!form.role) return alert('직책을 선택해주세요.');
     if (!form.start_date) return alert('시작일을 입력해주세요.');
@@ -1027,17 +1033,33 @@ function WorkHistoryInner({ employee, stores, user }) {
         end_date: form.end_date || null
       };
 
-      const { error } = await supabase.from('employee_store_history').insert(payload);
-      if (error) throw error;
+      if (editingId) {
+        const { error } = await supabase.from('employee_store_history').update(payload).eq('id', editingId);
+        if (error) throw error;
+        await writeAuditLog('근무이력수정', 'employee_store_history', editingId, user, `${employee.name} / ${form.store_name} / ${form.role} / ${form.start_date} ~ ${form.end_date || '현재'}`);
+      } else {
+        const { error } = await supabase.from('employee_store_history').insert(payload);
+        if (error) throw error;
+        await writeAuditLog('근무이력추가', 'employee_store_history', employee.id, user, `${employee.name} / ${form.store_name} / ${form.role} / ${form.start_date} ~ ${form.end_date || '현재'}`);
+      }
 
-      await writeAuditLog('근무이력추가', 'employee_store_history', employee.id, user, `${employee.name} / ${form.store_name} / ${form.role} / ${form.start_date} ~ ${form.end_date || '현재'}`);
-      setForm({ store_name: employee.store_name || '', role: employee.role || '직원', start_date: '', end_date: '' });
+      resetForm();
       load();
     } catch (e) {
       alert('근무이력 저장 오류: ' + e.message);
     } finally {
       setBusy(false);
     }
+  }
+
+  function editHistory(row) {
+    setEditingId(row.id);
+    setForm({
+      store_name: row.store_name || '',
+      role: row.role || '직원',
+      start_date: row.start_date || '',
+      end_date: row.end_date || ''
+    });
   }
 
   async function deleteHistory(row) {
@@ -1047,43 +1069,46 @@ function WorkHistoryInner({ employee, stores, user }) {
     if (error) return alert(error.message);
 
     await writeAuditLog('근무이력삭제', 'employee_store_history', row.id, user, `${employee.name} / ${row.store_name} / ${row.role} / ${row.start_date} ~ ${row.end_date || '현재'}`);
+    if (editingId === row.id) resetForm();
     load();
   }
 
   return (
     <section>
       <h3>근무이력</h3>
-      <div className="historyFormBalanced">
-        <div className="historyTopRow">
-          <select className="historyStoreSelect" value={form.store_name} onChange={e=>setForm({...form,store_name:e.target.value})}>
-            <option value="">매장 선택</option>
-            {stores.filter(s => s.name !== '관리자').map(s => <option key={s.id || s.name} value={s.name}>{s.name}</option>)}
-          </select>
-          <select className="historyRoleSelect" value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>
-            <option>직원</option>
-            <option>점장</option>
-            <option>검수자</option>
-            <option>관리자</option>
-          </select>
-        </div>
-        <div className="historyDateRow">
-          <input className="historyDateInput" type="date" value={form.start_date} onChange={e=>setForm({...form,start_date:e.target.value})} />
-          <span className="dateTilde">~</span>
-          <input className="historyDateInput" type="date" value={form.end_date} onChange={e=>setForm({...form,end_date:e.target.value})} />
-          <button className="primary historyAddBtn" onClick={addHistory} disabled={busy}>이력 추가</button>
-        </div>
+      <div className="historyFormSingle">
+        <select className="historyStoreSelect" value={form.store_name} onChange={e=>setForm({...form,store_name:e.target.value})}>
+          <option value="">매장 선택</option>
+          {stores.filter(s => s.name !== '관리자').map(s => <option key={s.id || s.name} value={s.name}>{s.name}</option>)}
+        </select>
+        <select className="historyRoleSelect" value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>
+          <option>직원</option>
+          <option>점장</option>
+          <option>검수자</option>
+          <option>관리자</option>
+        </select>
+        <input className="historyDateInput" type="date" value={form.start_date} onChange={e=>setForm({...form,start_date:e.target.value})} />
+        <span className="dateTilde">~</span>
+        <input className="historyDateInput" type="date" value={form.end_date} onChange={e=>setForm({...form,end_date:e.target.value})} />
+        <button className="primary historySaveBtn" onClick={saveHistory} disabled={busy}>{editingId ? '수정 저장' : '이력 추가'}</button>
+        {editingId && <button className="historyCancelBtn" onClick={resetForm}>취소</button>}
       </div>
       <p className="muted">종료일을 비워두면 현재 근무중으로 표시됩니다.</p>
 
-      <table>
-        <thead><tr><th>매장</th><th>직책</th><th>기간</th><th>삭제</th></tr></thead>
+      <table className="historyTable">
+        <thead><tr><th>매장</th><th>직책</th><th>기간</th><th>관리</th></tr></thead>
         <tbody>
           {rows.map(r => (
             <tr key={r.id}>
               <td>{r.store_name}</td>
               <td>{r.role}</td>
               <td>{r.start_date} ~ {r.end_date || '현재'}</td>
-              <td><button className="dangerBtn" onClick={()=>deleteHistory(r)}>삭제</button></td>
+              <td>
+                <div className="historyRowActions">
+                  <button onClick={()=>editHistory(r)}>수정</button>
+                  <button className="dangerBtn" onClick={()=>deleteHistory(r)}>삭제</button>
+                </div>
+              </td>
             </tr>
           ))}
           {!rows.length && <tr><td colSpan="4" className="muted">등록된 근무이력이 없습니다.</td></tr>}
@@ -1092,7 +1117,6 @@ function WorkHistoryInner({ employee, stores, user }) {
     </section>
   );
 }
-
 
 function AuditLogsViewer() {
   const [logs, setLogs] = useState([]);
