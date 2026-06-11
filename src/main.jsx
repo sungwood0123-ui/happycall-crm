@@ -34,8 +34,13 @@ async function fetchAllRows(tableName, selectText = '*', orderColumn = null) {
 const CALL_RESULTS = {
   '통화완료': ['불만사항없음', '불만사항있음'],
   '부재중': ['카카오톡발송', '문자발송'],
-  '통화거부': ['통화거부']
+  '통화 불가': ['워치', '타점 변경', '통신사 이동', '해지', '마케팅 미동의']
 };
+
+function isUnavailableCall(result, detail) {
+  return result === '통화 불가' || result === '통화거부' || detail === '통화거부' ||
+    ['워치', '타점 변경', '통신사 이동', '해지', '마케팅 미동의'].includes(detail);
+}
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -185,6 +190,41 @@ function PasswordChangeModal({ user, onClose, onUserUpdate }) {
   );
 }
 
+
+function AutoLogoutGuard({ onLogout }) {
+  useEffect(() => {
+    const TIMEOUT_MS = 60 * 60 * 1000;
+    const WARN_MS = 55 * 60 * 1000;
+    let warnTimer;
+    let logoutTimer;
+
+    function resetTimers() {
+      clearTimeout(warnTimer);
+      clearTimeout(logoutTimer);
+      warnTimer = setTimeout(() => {
+        const keep = confirm('5분 후 자동 로그아웃됩니다. 계속 사용하시겠습니까?');
+        if (keep) resetTimers();
+      }, WARN_MS);
+      logoutTimer = setTimeout(() => {
+        alert('60분 동안 활동이 없어 자동 로그아웃되었습니다.');
+        onLogout();
+      }, TIMEOUT_MS);
+    }
+
+    const events = ['click', 'keydown', 'touchstart', 'scroll'];
+    events.forEach(ev => window.addEventListener(ev, resetTimers, { passive: true }));
+    resetTimers();
+
+    return () => {
+      clearTimeout(warnTimer);
+      clearTimeout(logoutTimer);
+      events.forEach(ev => window.removeEventListener(ev, resetTimers));
+    };
+  }, [onLogout]);
+
+  return null;
+}
+
 function MainApp({ user, onLogout, onUserUpdate }) {
   const [tab, setTab] = useState('mycalls');
   const [showPassword, setShowPassword] = useState(false);
@@ -195,6 +235,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
 
   return (
     <div className="app">
+      <AutoLogoutGuard onLogout={onLogout} />
       <header>
         <div>
           <h1>세찬 해피콜 관리시스템</h1>
@@ -260,7 +301,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
             {openMenu === 'logs' && (
               <div className="compactItems">
                 <button className={tab==='audit'?'active':''} onClick={()=>setTab('audit')}>감사로그</button>
-                <button className={tab==='refused'?'active':''} onClick={()=>setTab('refused')}>통화거부 고객</button>
+                <button className={tab==='refused'?'active':''} onClick={()=>setTab('refused')}>통화 불가 고객</button>
               </div>
             )}
           </div>
@@ -722,13 +763,13 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
       const { error } = await supabase.from('happycall_logs').insert(payload);
       if (error) throw error;
 
-      if (result === '통화거부' || detail === '통화거부') {
+      if (isUnavailableCall(result, detail)) {
         await supabase.from('refused_customers').upsert({
           join_no: target.join_no,
           target_id: target.id,
           refused_by: user.name,
           refused_at: new Date().toISOString(),
-          memo: memo || '통화거부'
+          memo: memo || detail || '통화 불가'
         }, { onConflict: 'join_no' });
       }
 
@@ -1263,17 +1304,17 @@ function RefusedCustomersViewer() {
       const data = await fetchAllRows('refused_customers', '*', 'refused_at');
       setRows((data || []).sort((a,b)=>String(b.refused_at || '').localeCompare(String(a.refused_at || ''))));
     } catch (e) {
-      alert('통화거부 고객 조회 오류: ' + e.message);
+      alert('통화 불가 고객 조회 오류: ' + e.message);
     }
   }
 
   return (
     <div>
-      <h2>통화거부 고객</h2>
+      <h2>통화 불가 고객</h2>
       <div className="sectionCard">
         <table>
           <thead>
-            <tr><th>가입번호</th><th>거부일시(KST)</th><th>처리자</th><th>메모</th></tr>
+            <tr><th>가입번호</th><th>통화불가일시(KST)</th><th>처리자</th><th>사유/메모</th></tr>
           </thead>
           <tbody>
             {rows.map(r => (
@@ -1284,7 +1325,7 @@ function RefusedCustomersViewer() {
                 <td>{r.memo || '-'}</td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan="4" className="muted">통화거부 고객이 없습니다.</td></tr>}
+            {!rows.length && <tr><td colSpan="4" className="muted">통화 불가 고객이 없습니다.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1292,38 +1333,75 @@ function RefusedCustomersViewer() {
   );
 }
 
+
+function maskSensitiveAuditDetail(detail) {
+  const text = String(detail || '');
+  if (!text) return '-';
+  if (text.includes('"password"') || text.includes("'password'") || text.toLowerCase().includes('password')) {
+    return text.replace(/["']?password["']?\s*:\s*["'][^"']*["']/gi, '비밀번호: 변경됨');
+  }
+  return text;
+}
+
 function AuditLogsViewer() {
   const [logs, setLogs] = useState([]);
+  const [actorFilter, setActorFilter] = useState('전체');
+  const [actionFilter, setActionFilter] = useState('전체');
+  const [keyword, setKeyword] = useState('');
 
   useEffect(() => { load(); }, []);
 
   async function load() {
     try {
       const rows = await fetchAllRows('audit_logs', '*', 'created_at');
-      setLogs((rows || []).sort((a,b)=>String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 300));
+      setLogs((rows || []).sort((a,b)=>String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 500));
     } catch (e) {
       alert('감사로그 조회 오류: ' + e.message);
     }
   }
 
+  const actors = useMemo(() => ['전체', ...Array.from(new Set(logs.map(l => l.actor_name).filter(Boolean))).sort((a,b)=>String(a).localeCompare(String(b), 'ko'))], [logs]);
+  const actions = useMemo(() => ['전체', ...Array.from(new Set(logs.map(l => l.action).filter(Boolean))).sort((a,b)=>String(a).localeCompare(String(b), 'ko'))], [logs]);
+
+  const filteredLogs = useMemo(() => {
+    const q = keyword.trim().toLowerCase();
+    return logs.filter(l => {
+      if (actorFilter !== '전체' && l.actor_name !== actorFilter) return false;
+      if (actionFilter !== '전체' && l.action !== actionFilter) return false;
+      if (!q) return true;
+      const text = `${l.actor_name || ''} ${l.action || ''} ${l.detail || ''} ${l.target_type || ''} ${l.target_id || ''}`.toLowerCase();
+      return text.includes(q);
+    });
+  }, [logs, actorFilter, actionFilter, keyword]);
+
   return (
     <div>
       <h2>감사로그</h2>
+      <div className="sectionCard auditFilterBox">
+        <select value={actorFilter} onChange={e=>setActorFilter(e.target.value)}>
+          {actors.map(a => <option key={a}>{a}</option>)}
+        </select>
+        <select value={actionFilter} onChange={e=>setActionFilter(e.target.value)}>
+          {actions.map(a => <option key={a}>{a}</option>)}
+        </select>
+        <input placeholder="작업내용 검색" value={keyword} onChange={e=>setKeyword(e.target.value)} />
+        <button onClick={() => { setActorFilter('전체'); setActionFilter('전체'); setKeyword(''); }}>필터 초기화</button>
+      </div>
       <div className="sectionCard">
         <table>
           <thead>
             <tr><th>일시(KST)</th><th>작업자</th><th>작업</th><th>상세</th></tr>
           </thead>
           <tbody>
-            {logs.map(l => (
+            {filteredLogs.map(l => (
               <tr key={l.id}>
                 <td>{formatKST(l.created_at)}</td>
                 <td>{l.actor_name}</td>
                 <td>{l.action}</td>
-                <td>{l.detail || `${l.target_type || ''} ${l.target_id || ''}`}</td>
+                <td>{maskSensitiveAuditDetail(l.detail || `${l.target_type || ''} ${l.target_id || ''}`)}</td>
               </tr>
             ))}
-            {!logs.length && <tr><td colSpan="4" className="muted">감사로그 기록이 없습니다.</td></tr>}
+            {!filteredLogs.length && <tr><td colSpan="4" className="muted">조건에 맞는 감사로그가 없습니다.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -2348,7 +2426,7 @@ function TargetGenerator({ user }) {
         <p className="muted">대상일 기준으로 D+1, D+7, D+13, D+95, D+185와 월간 정기 해피콜을 생성합니다.</p>
         <p className="muted">D+95/D+185는 판매자 재직 시 본인 배정, 판매자 퇴사 시 근무이력 기준 당시 점장 또는 현재 매장 점장에게 배정됩니다.</p>
         <p className="muted">당월 D+ 해피콜이 있는 고객은 해당 월의 월간 정기 해피콜에서 제외됩니다.</p>
-        <p className="muted">통화거부 고객은 이후 해피콜 생성 대상에서 제외됩니다.</p>
+        <p className="muted">통화 불가 고객은 이후 해피콜 생성 대상에서 제외됩니다.</p>
 
         <div className="formGrid compact">
           <input type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} />
@@ -2427,7 +2505,7 @@ function ManagerStoreDashboard({ user }) {
     const done = targets.filter(t => latestLogByTarget[t.id]).length;
     const voc = targets.filter(t => latestLogByTarget[t.id]?.call_detail === '불만사항있음').length;
     const absent = targets.filter(t => latestLogByTarget[t.id]?.call_result === '부재중').length;
-    const rejected = targets.filter(t => latestLogByTarget[t.id]?.call_result === '통화거부').length;
+    const rejected = targets.filter(t => isUnavailableCall(latestLogByTarget[t.id]?.call_result, latestLogByTarget[t.id]?.call_detail)).length;
     return { total, done, pending: total - done, voc, absent, rejected, rate: total ? Math.round(done / total * 1000) / 10 : 0 };
   }, [targets, latestLogByTarget]);
   const byEmployee = useMemo(() => {

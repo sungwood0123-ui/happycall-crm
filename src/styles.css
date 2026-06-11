@@ -1174,3 +1174,31 @@ select{
   width:16px;
   height:16px;
 }
+
+/* V15 unavailable call + audit filters */
+.auditFilterBox{
+  display:grid;
+  grid-template-columns:150px 180px minmax(180px, 1fr) 110px;
+  gap:8px;
+  align-items:center;
+}
+.auditFilterBox select,
+.auditFilterBox input,
+.auditFilterBox button{
+  height:38px;
+  min-height:38px;
+  font-size:12px;
+  box-sizing:border-box;
+  white-space:nowrap;
+}
+.auditFilterBox button{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:0 12px;
+}
+@media (max-width:768px){
+  .auditFilterBox{
+    grid-template-columns:1fr;
+  }
+}
