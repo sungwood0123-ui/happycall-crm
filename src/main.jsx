@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v17.2-20260612034930';
+const APP_BUILD_VERSION = 'v17.3-20260612035717';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -276,7 +276,6 @@ function UpdateNotice({ user }) {
       const role = user?.role || '직원';
       const allowed = visibleRolesForUser(role);
       if (!Array.isArray(rawChanges)) return [];
-
       return rawChanges
         .map(item => {
           if (typeof item === 'string') return item;
@@ -303,7 +302,8 @@ function UpdateNotice({ user }) {
 
         if (data.version && data.version !== APP_BUILD_VERSION) {
           setNextVersion(data.version);
-          setChanges(filterChangesByRole(data.changes));
+          // latestChanges only: 누적 변경내역이 아니라 이번 배포 변경분만 표시
+          setChanges(filterChangesByRole(data.latestChanges || data.changes || []));
           setHasUpdate(true);
         }
       } catch (e) {}
@@ -353,7 +353,7 @@ function UpdateNotice({ user }) {
 
         {changes.length > 0 && (
           <div className="updateChangeBox">
-            <h3>수정 내용</h3>
+            <h3>이번 수정 내용</h3>
             <ul>
               {changes.map((item, idx) => <li key={idx}>{item}</li>)}
             </ul>
@@ -1564,7 +1564,7 @@ function SuggestionsPage({ user }) {
   const [content, setContent] = useState('');
   const [statusFilter, setStatusFilter] = useState('전체');
   const [keyword, setKeyword] = useState('');
-  const [commentDrafts, setCommentDrafts] = useState({});
+  const [selected, setSelected] = useState(null);
 
   useEffect(() => { load(); }, []);
 
@@ -1610,9 +1610,13 @@ function SuggestionsPage({ user }) {
 
   async function updateSuggestion(row, patch) {
     try {
-      const { error } = await supabase.from('suggestions').update(patch).eq('id', row.id);
+      const { error } = await supabase.from('suggestions').update({
+        ...patch,
+        updated_at: new Date().toISOString()
+      }).eq('id', row.id);
       if (error) throw error;
       await writeAuditLog('건의문의수정', 'suggestions', row.id, user, `${row.title} / ${JSON.stringify(patch)}`);
+      setSelected(null);
       load();
     } catch (e) {
       askErrorReport({ user, currentTab: '건의/문의', actionName: '건의 상태/코멘트 수정', error: e });
@@ -1630,29 +1634,32 @@ function SuggestionsPage({ user }) {
 
   return (
     <div>
-      <h2>건의/문의 사항</h2>
+      <h2>{user.role === '관리자' ? '건의/문의 관리' : '건의/문의 사항'}</h2>
 
-      <div className="sectionCard suggestionWriteBox">
-        <select value={category} onChange={e=>setCategory(e.target.value)}>
-          <option>기능추가</option>
-          <option>수정요청</option>
-          <option>오류문의</option>
-          <option>기타</option>
-        </select>
-        <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="제목 입력" />
-        <textarea value={content} onChange={e=>setContent(e.target.value)} placeholder="건의/문의 내용을 입력해주세요." />
-        <button className="primary" onClick={submitSuggestion}>건의/문의 등록</button>
-      </div>
+      {user.role !== '관리자' && (
+        <div className="sectionCard suggestionWriteBox">
+          <select value={category} onChange={e=>setCategory(e.target.value)}>
+            <option>기능추가</option>
+            <option>수정요청</option>
+            <option>오류문의</option>
+            <option>기타</option>
+          </select>
+          <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="제목 입력" />
+          <textarea value={content} onChange={e=>setContent(e.target.value)} placeholder="건의/문의 내용을 입력해주세요." />
+          <button className="primary suggestionSubmitBtn" onClick={submitSuggestion}>건의/문의 등록</button>
+        </div>
+      )}
 
       <div className="sectionCard suggestionFilterBox">
         <select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
           <option>전체</option>
           <option>접수</option>
           <option>확인중</option>
+          <option>반영예정</option>
           <option>반영완료</option>
           <option>보류</option>
         </select>
-        <input value={keyword} onChange={e=>setKeyword(e.target.value)} placeholder="검색" />
+        <input value={keyword} onChange={e=>setKeyword(e.target.value)} placeholder={user.role === '관리자' ? '작성자/매장/제목/내용 검색' : '검색'} />
         <button onClick={()=>{setStatusFilter('전체'); setKeyword('');}}>초기화</button>
       </div>
 
@@ -1662,6 +1669,7 @@ function SuggestionsPage({ user }) {
             <tr>
               <th>일시</th>
               {user.role === '관리자' && <th>작성자</th>}
+              {user.role === '관리자' && <th>매장/권한</th>}
               <th>구분</th>
               <th>제목/내용</th>
               <th>상태</th>
@@ -1670,47 +1678,76 @@ function SuggestionsPage({ user }) {
           </thead>
           <tbody>
             {filtered.map(r => (
-              <tr key={r.id}>
+              <tr key={r.id} className={user.role === '관리자' ? 'clickableRow' : ''} onClick={() => user.role === '관리자' && setSelected(r)}>
                 <td>{formatKST(r.created_at)}</td>
-                {user.role === '관리자' && <td>{r.requester_store} / {r.requester_name}</td>}
+                {user.role === '관리자' && <td>{r.requester_name}</td>}
+                {user.role === '관리자' && <td>{r.requester_store} / {r.requester_role}</td>}
                 <td>{r.category}</td>
                 <td className="suggestionContentCell">
                   <b>{r.title}</b>
                   <p>{r.content}</p>
                 </td>
-                <td>
-                  {user.role === '관리자' ? (
-                    <select value={r.status || '접수'} onChange={e=>updateSuggestion(r, { status: e.target.value })}>
-                      <option>접수</option>
-                      <option>확인중</option>
-                      <option>반영완료</option>
-                      <option>보류</option>
-                    </select>
-                  ) : (r.status || '접수')}
-                </td>
+                <td>{r.status || '접수'}</td>
                 <td className="suggestionCommentCell">
-                  {user.role === '관리자' ? (
-                    <div className="adminCommentBox">
-                      <textarea
-                        value={commentDrafts[r.id] ?? (r.admin_comment || '')}
-                        onChange={e=>setCommentDrafts({...commentDrafts, [r.id]: e.target.value})}
-                        placeholder="관리자 코멘트 입력"
-                      />
-                      <button onClick={()=>updateSuggestion(r, { admin_comment: commentDrafts[r.id] ?? (r.admin_comment || '') })}>코멘트 저장</button>
-                    </div>
-                  ) : (
-                    <p>{r.admin_comment || '아직 관리자 코멘트가 없습니다.'}</p>
-                  )}
+                  <p>{r.admin_comment || '아직 관리자 코멘트가 없습니다.'}</p>
                 </td>
               </tr>
             ))}
-            {!filtered.length && <tr><td colSpan={user.role === '관리자' ? 6 : 5} className="muted">건의/문의 내역이 없습니다.</td></tr>}
+            {!filtered.length && <tr><td colSpan={user.role === '관리자' ? 7 : 5} className="muted">건의/문의 내역이 없습니다.</td></tr>}
           </tbody>
         </table>
+      </div>
+
+      {selected && <SuggestionAdminModal row={selected} onClose={() => setSelected(null)} onSave={updateSuggestion} />}
+    </div>
+  );
+}
+
+function SuggestionAdminModal({ row, onClose, onSave }) {
+  const [status, setStatus] = useState(row.status || '접수');
+  const [comment, setComment] = useState(row.admin_comment || '');
+
+  return (
+    <div className="modalBg">
+      <div className="modal suggestionDetailModal">
+        <div className="modalHead">
+          <h2>건의/문의 상세</h2>
+          <button onClick={onClose}>닫기</button>
+        </div>
+
+        <section>
+          <h3>요청 정보</h3>
+          <div className="infoGrid">
+            <p><b>등록일</b><br />{formatKST(row.created_at)}</p>
+            <p><b>작성자</b><br />{row.requester_store} / {row.requester_name}</p>
+            <p><b>권한</b><br />{row.requester_role}</p>
+            <p><b>구분</b><br />{row.category}</p>
+          </div>
+        </section>
+
+        <section>
+          <h3>{row.title}</h3>
+          <pre className="suggestionFullText">{row.content}</pre>
+        </section>
+
+        <section>
+          <h3>관리자 처리</h3>
+          <select value={status} onChange={e=>setStatus(e.target.value)}>
+            <option>접수</option>
+            <option>확인중</option>
+            <option>반영예정</option>
+            <option>반영완료</option>
+            <option>보류</option>
+          </select>
+          <textarea value={comment} onChange={e=>setComment(e.target.value)} placeholder="관리자 코멘트 입력" />
+          <button className="primary" onClick={() => onSave(row, { status, admin_comment: comment })}>저장</button>
+        </section>
       </div>
     </div>
   );
 }
+
+
 
 function ErrorReportsViewer({ user }) {
   const [rows, setRows] = useState([]);
