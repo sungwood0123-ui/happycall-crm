@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v17.9-20260612071849';
+const APP_BUILD_VERSION = 'v18-20260612075459';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -2322,7 +2322,20 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
   }
 
   async function copyIncompleteRows() {
-    const list = rows.filter(r => r.total > 0 && Math.round(r.done / r.total * 1000) / 10 < 100);
+    const operatingStores = ['금촌', '야당', '봉일천', '화정', '능곡'];
+    const storeOrder = { '금촌': 0, '야당': 1, '봉일천': 2, '화정': 3, '능곡': 4 };
+
+    const list = rows
+      .filter(r => r.total > 0)
+      .filter(r => operatingStores.includes(r.store))
+      .filter(r => r.name && r.name !== '배정불가' && !String(r.name).includes('배정불가'))
+      .filter(r => Math.round(r.done / r.total * 1000) / 10 < 100)
+      .sort((a,b) => {
+        const storeDiff = (storeOrder[a.store] ?? 999) - (storeOrder[b.store] ?? 999);
+        if (storeDiff !== 0) return storeDiff;
+        return String(a.name).localeCompare(String(b.name), 'ko');
+      });
+
     if (!list.length) return alert('이미지로 복사할 미완료자가 없습니다.');
 
     const sumTotal = list.reduce((a,r)=>a+r.total,0);
@@ -2330,11 +2343,16 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
     const rate = sumTotal ? Math.round(sumDone / sumTotal * 1000) / 10 : 0;
 
     const scale = 2;
-    const rowH = 46;
-    const headerH = 112;
-    const footerH = 66;
-    const width = 860;
-    const height = headerH + 46 + (list.length * rowH) + footerH;
+    const width = 980;
+    const marginX = 44;
+    const titleY = 58;
+    const dateY = 86;
+    const tableTop = 132;
+    const headerH = 44;
+    const rowH = 48;
+    const footerH = 74;
+    const bottomPadding = 36;
+    const height = tableTop + headerH + (list.length * rowH) + footerH + bottomPadding;
 
     const canvas = document.createElement('canvas');
     canvas.width = width * scale;
@@ -2355,73 +2373,84 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
       ctx.closePath();
     }
 
+    function ellipsis(text, maxWidth) {
+      let t = String(text || '-');
+      if (ctx.measureText(t).width <= maxWidth) return t;
+      while (t.length > 1 && ctx.measureText(t + '…').width > maxWidth) {
+        t = t.slice(0, -1);
+      }
+      return t + '…';
+    }
+
     ctx.fillStyle = '#f3f4f6';
     ctx.fillRect(0, 0, width, height);
 
     ctx.fillStyle = '#ffffff';
-    roundRect(18, 18, width - 36, height - 36, 18);
+    roundRect(18, 18, width - 36, height - 36, 20);
     ctx.fill();
 
     ctx.fillStyle = '#111827';
     ctx.font = 'bold 28px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-    ctx.fillText('해피콜 미완료 현황', 42, 58);
+    ctx.fillText('해피콜 미완료 현황', marginX, titleY);
 
     const now = new Date();
     const nowText = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
     ctx.fillStyle = '#6b7280';
     ctx.font = '14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-    ctx.fillText(`${mode === 'store' ? user.store_name + ' ' : ''}${nowText} 기준`, 42, 84);
+    ctx.fillText(`${mode === 'store' ? user.store_name + ' ' : ''}${nowText} 기준`, marginX, dateY);
 
-    const tableX = 42;
-    const tableY = 112;
+    const tableX = marginX;
+    const tableW = width - (marginX * 2);
     const cols = [
-      { label: '인원', x: tableX, w: 150 },
-      { label: '매장', x: tableX + 150, w: 130 },
-      { label: '대상건', x: tableX + 280, w: 130 },
-      { label: '완료건', x: tableX + 410, w: 130 },
-      { label: '완료율', x: tableX + 540, w: 180 },
+      { label: '인원', x: tableX + 18, w: 190 },
+      { label: '매장', x: tableX + 232, w: 126 },
+      { label: '대상건', x: tableX + 390, w: 112 },
+      { label: '완료건', x: tableX + 530, w: 112 },
+      { label: '완료율', x: tableX + 670, w: 140 },
     ];
 
     ctx.fillStyle = '#111827';
-    roundRect(tableX - 12, tableY - 28, width - 84, 42, 12);
+    roundRect(tableX, tableTop, tableW, headerH, 12);
     ctx.fill();
 
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-    cols.forEach(c => ctx.fillText(c.label, c.x, tableY - 2));
+    ctx.font = 'bold 15px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    cols.forEach(c => ctx.fillText(c.label, c.x, tableTop + 28));
 
-    ctx.font = '16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.font = '15px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     list.forEach((r, idx) => {
-      const y = tableY + 34 + (idx * rowH);
+      const yTop = tableTop + headerH + (idx * rowH);
+      const yText = yTop + 30;
+
       if (idx % 2 === 0) {
         ctx.fillStyle = '#f9fafb';
-        roundRect(tableX - 12, y - 26, width - 84, 38, 10);
+        roundRect(tableX, yTop + 5, tableW, rowH - 8, 10);
         ctx.fill();
       }
 
       const rRate = r.total ? Math.round(r.done / r.total * 1000) / 10 : 0;
       ctx.fillStyle = '#111827';
-      ctx.fillText(r.name, cols[0].x, y);
-      ctx.fillText(r.store || '-', cols[1].x, y);
-      ctx.fillText(`${r.total}건`, cols[2].x, y);
-      ctx.fillText(`${r.done}건`, cols[3].x, y);
+      ctx.font = '15px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      ctx.fillText(ellipsis(r.name, cols[0].w), cols[0].x, yText);
+      ctx.fillText(ellipsis(r.store || '-', cols[1].w), cols[1].x, yText);
+      ctx.fillText(`${r.total}건`, cols[2].x, yText);
+      ctx.fillText(`${r.done}건`, cols[3].x, yText);
 
       ctx.fillStyle = rRate >= 80 ? '#166534' : rRate >= 50 ? '#9a3412' : '#991b1b';
-      ctx.font = 'bold 16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-      ctx.fillText(`${rRate}%`, cols[4].x, y);
-      ctx.font = '16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      ctx.font = 'bold 15px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      ctx.fillText(`${rRate}%`, cols[4].x, yText);
     });
 
-    const footerY = tableY + 42 + (list.length * rowH) + 18;
+    const footerY = tableTop + headerH + (list.length * rowH) + 18;
     ctx.fillStyle = '#eff6ff';
-    roundRect(42, footerY, width - 84, 44, 12);
+    roundRect(tableX, footerY, tableW, 48, 14);
     ctx.fill();
 
     ctx.fillStyle = '#1e3a8a';
     ctx.font = 'bold 16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-    ctx.fillText(`총 대상 ${sumTotal}건`, 62, footerY + 28);
-    ctx.fillText(`총 완료 ${sumDone}건`, 220, footerY + 28);
-    ctx.fillText(`전체 완료율 ${rate}%`, 378, footerY + 28);
+    ctx.fillText(`총 대상 ${sumTotal}건`, tableX + 20, footerY + 31);
+    ctx.fillText(`총 완료 ${sumDone}건`, tableX + 190, footerY + 31);
+    ctx.fillText(`전체 완료율 ${rate}%`, tableX + 360, footerY + 31);
 
     canvas.toBlob(async (blob) => {
       if (!blob) return alert('이미지 생성에 실패했습니다.');

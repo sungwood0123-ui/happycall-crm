@@ -1721,3 +1721,67 @@ input.requiredInput::placeholder{
     width:100% !important;
   }
 }
+
+/* V18 final UI/image layout fixes */
+.bulkTempToolbar{
+  display:flex !important;
+  flex-wrap:wrap !important;
+  align-items:center !important;
+  gap:10px !important;
+}
+
+.bulkTempToolbar select,
+.bulkTempToolbar button{
+  height:44px !important;
+  min-height:44px !important;
+  max-height:44px !important;
+  line-height:1 !important;
+  padding:0 14px !important;
+  box-sizing:border-box !important;
+  border-radius:12px !important;
+  font-size:13px !important;
+  white-space:nowrap !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  margin:0 !important;
+  vertical-align:middle !important;
+}
+
+.bulkTempToolbar select{
+  appearance:auto !important;
+  min-width:128px !important;
+  display:block !important;
+  line-height:normal !important;
+}
+
+.bulkTempToolbar select:nth-child(3){
+  min-width:220px !important;
+  flex:1 1 220px !important;
+}
+
+.bulkTempToolbar button{
+  flex:0 0 auto !important;
+}
+
+.bulkTempModal .modalHead,
+.bulkTempModal section{
+  box-sizing:border-box !important;
+}
+
+.bulkTempModal table th,
+.bulkTempModal table td{
+  text-align:center !important;
+  vertical-align:middle !important;
+}
+
+@media (max-width:768px){
+  .bulkTempToolbar{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+  }
+  .bulkTempToolbar select,
+  .bulkTempToolbar button{
+    width:100% !important;
+  }
+}
