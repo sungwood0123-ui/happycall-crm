@@ -1444,6 +1444,7 @@ function ErrorReportsViewer({ user }) {
   const [rows, setRows] = useState([]);
   const [statusFilter, setStatusFilter] = useState('전체');
   const [keyword, setKeyword] = useState('');
+  const [selected, setSelected] = useState(null);
 
   useEffect(() => { load(); }, []);
 
@@ -1468,7 +1469,7 @@ function ErrorReportsViewer({ user }) {
     return rows.filter(r => {
       if (statusFilter !== '전체' && (r.status || '접수') !== statusFilter) return false;
       if (!q) return true;
-      return `${r.reporter_name || ''} ${r.reporter_role || ''} ${r.reporter_store || ''} ${r.action_name || ''} ${r.join_no || ''} ${r.error_message || ''}`.toLowerCase().includes(q);
+      return `${r.reporter_name || ''} ${r.reporter_role || ''} ${r.reporter_store || ''} ${r.current_tab || ''} ${r.action_name || ''} ${r.join_no || ''} ${r.error_message || ''} ${r.user_agent || ''}`.toLowerCase().includes(q);
     });
   }, [rows, statusFilter, keyword]);
 
@@ -1502,7 +1503,11 @@ function ErrorReportsViewer({ user }) {
                 <td>{r.reporter_store}</td>
                 <td>{r.action_name}</td>
                 <td>{r.join_no || '-'}</td>
-                <td className="errorMessageCell">{r.error_message}</td>
+                <td>
+                  <button className="errorPreviewBox" onClick={() => setSelected(r)} title="클릭하면 전체 오류내용을 확인합니다.">
+                    {r.error_message}
+                  </button>
+                </td>
                 <td>
                   <select value={r.status || '접수'} onChange={e=>updateStatus(r, e.target.value)}>
                     <option>접수</option>
@@ -1516,6 +1521,76 @@ function ErrorReportsViewer({ user }) {
             {!filtered.length && <tr><td colSpan="8" className="muted">오류보고가 없습니다.</td></tr>}
           </tbody>
         </table>
+      </div>
+
+      {selected && <ErrorReportDetailModal row={selected} onClose={() => setSelected(null)} />}
+    </div>
+  );
+}
+
+function ErrorReportDetailModal({ row, onClose }) {
+  const detailText = `오류보고 상세
+일시: ${formatKST(row.created_at)}
+보고자: ${row.reporter_name || '-'}
+권한: ${row.reporter_role || '-'}
+매장: ${row.reporter_store || '-'}
+화면/탭: ${row.current_tab || '-'}
+작업: ${row.action_name || '-'}
+가입번호: ${row.join_no || '-'}
+상태: ${row.status || '접수'}
+
+오류내용:
+${row.error_message || '-'}
+
+브라우저:
+${row.user_agent || '-'}`;
+
+  async function copyDetail() {
+    try {
+      await navigator.clipboard.writeText(detailText);
+      alert('오류 상세내용이 복사되었습니다.');
+    } catch (e) {
+      alert('복사 실패: 직접 드래그해서 복사해주세요.');
+    }
+  }
+
+  return (
+    <div className="modalBg">
+      <div className="modal errorDetailModal">
+        <div className="modalHead">
+          <h2>오류보고 상세</h2>
+          <button onClick={onClose}>닫기</button>
+        </div>
+
+        <section>
+          <h3>작업 상황</h3>
+          <div className="infoGrid">
+            <p><b>일시</b><br />{formatKST(row.created_at)}</p>
+            <p><b>보고자</b><br />{row.reporter_name || '-'}</p>
+            <p><b>권한</b><br />{row.reporter_role || '-'}</p>
+            <p><b>매장</b><br />{row.reporter_store || '-'}</p>
+            <p><b>화면/탭</b><br />{row.current_tab || '-'}</p>
+            <p><b>작업</b><br />{row.action_name || '-'}</p>
+            <p><b>가입번호</b><br />{row.join_no || '-'}</p>
+            <p><b>상태</b><br />{row.status || '접수'}</p>
+          </div>
+        </section>
+
+        <section>
+          <h3>오류내용</h3>
+          <pre className="errorFullText">{row.error_message || '-'}</pre>
+        </section>
+
+        <section>
+          <h3>브라우저 정보</h3>
+          <pre className="errorFullText">{row.user_agent || '-'}</pre>
+        </section>
+
+        <section>
+          <h3>복붙용 전체 내용</h3>
+          <textarea className="errorCopyText" readOnly value={detailText} />
+          <button className="primary" onClick={copyDetail}>전체 내용 복사</button>
+        </section>
       </div>
     </div>
   );

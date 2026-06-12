@@ -1311,3 +1311,58 @@ select{
     font-size:22px;
   }
 }
+
+/* V16.3 error report detail UI */
+.errorPreviewBox{
+  width:360px;
+  max-width:360px;
+  height:38px;
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  background:#f9fafb;
+  color:#111827;
+  text-align:left;
+  padding:0 12px;
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  cursor:pointer;
+  font-size:12px;
+}
+.errorPreviewBox:hover{
+  background:#eef2ff;
+  border-color:#c7d2fe;
+}
+.errorDetailModal{
+  width:min(860px, 94vw) !important;
+  max-width:860px !important;
+}
+.errorFullText{
+  white-space:pre-wrap;
+  word-break:break-word;
+  background:#f9fafb;
+  border:1px solid #e5e7eb;
+  border-radius:12px;
+  padding:12px;
+  font-size:12px;
+  line-height:1.45;
+  max-height:180px;
+  overflow:auto;
+}
+.errorCopyText{
+  width:100%;
+  min-height:210px;
+  border:1px solid #e5e7eb;
+  border-radius:12px;
+  padding:12px;
+  font-size:12px;
+  line-height:1.45;
+  box-sizing:border-box;
+}
+@media (max-width:768px){
+  .errorPreviewBox{
+    width:260px;
+    max-width:260px;
+  }
+}
