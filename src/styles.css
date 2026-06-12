@@ -1549,3 +1549,39 @@ input.requiredInput::placeholder{
     width:100% !important;
   }
 }
+
+/* V17.7 cumulative */
+.tempAssignBox,
+.allCallFilterBox{
+  display:grid;
+  gap:8px;
+  align-items:center;
+}
+.tempAssignBox{
+  grid-template-columns:minmax(180px,1fr) 130px;
+}
+.allCallFilterBox{
+  grid-template-columns:160px 160px 110px;
+}
+.tempAssignBox select,
+.tempAssignBox button,
+.allCallFilterBox select,
+.allCallFilterBox button{
+  height:40px;
+  min-height:40px;
+  font-size:12px;
+  box-sizing:border-box;
+  white-space:nowrap;
+}
+.tempAssignBox button,
+.allCallFilterBox button{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+}
+@media (max-width:768px){
+  .tempAssignBox,
+  .allCallFilterBox{
+    grid-template-columns:1fr;
+  }
+}

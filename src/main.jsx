@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v17.3-20260612035717';
+const APP_BUILD_VERSION = 'v17.7-20260612054249';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -47,6 +47,31 @@ function isUnavailableCall(result, detail) {
 function shouldExcludeUnavailable(detail) {
   return isUnavailableCall('통화 불가', detail) && detail !== '미성년자';
 }
+
+function toComparableDate(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (!Number.isNaN(d.getTime())) return d.getTime();
+  const normalized = String(value).replace(/\./g, '-').replace(/\s+/g, '').slice(0, 10);
+  const d2 = new Date(normalized);
+  return Number.isNaN(d2.getTime()) ? null : d2.getTime();
+}
+
+function isNewOpeningAfterRefusal(openDate, refusedAt) {
+  const openTime = toComparableDate(openDate);
+  const refusedTime = toComparableDate(refusedAt);
+  if (!openTime || !refusedTime) return false;
+  return openTime > refusedTime;
+}
+
+function shouldSkipByRefusedCustomer(customer, refusedMap, callType = '') {
+  if (isD95D185Type(callType)) return false;
+  const refused = refusedMap?.[customer.join_no];
+  if (!refused) return false;
+  if (isNewOpeningAfterRefusal(customer.open_date, refused.refused_at)) return false;
+  return true;
+}
+
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -798,6 +823,8 @@ function CallList({ user, mode, readOnly = false }) {
   const [logs, setLogs] = useState([]);
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState('미완료전체');
+  const [storeFilter, setStoreFilter] = useState('전체');
+  const [employeeFilter, setEmployeeFilter] = useState('전체');
 
   useEffect(() => { load(); }, [mode]);
 
@@ -805,7 +832,7 @@ function CallList({ user, mode, readOnly = false }) {
     try {
       let allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
       let visible = (allTargets || []).filter(t => !t.is_skipped);
-      if (mode === 'mine') visible = visible.filter(t => t.assigned_employee === user.name);
+      if (mode === 'mine') visible = visible.filter(t => t.assigned_employee === user.name || t.temporary_assignee === user.name);
       if (mode === 'store') visible = visible.filter(t => t.assigned_store === user.store_name);
       const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
       setTargets(visible);
@@ -826,15 +853,26 @@ function CallList({ user, mode, readOnly = false }) {
 
   const stats = useMemo(() => calculateCallStats(targets, latestLogByTarget), [targets, latestLogByTarget]);
 
+  const storeOptions = useMemo(() => ['전체', ...Array.from(new Set(targets.map(t => t.assigned_store).filter(Boolean))).sort((a,b)=>String(a).localeCompare(String(b), 'ko'))], [targets]);
+  const employeeOptions = useMemo(() => {
+    let base = targets;
+    if (storeFilter !== '전체') base = base.filter(t => t.assigned_store === storeFilter);
+    return ['전체', ...Array.from(new Set(base.map(t => t.assigned_employee).filter(Boolean))).sort((a,b)=>String(a).localeCompare(String(b), 'ko'))];
+  }, [targets, storeFilter]);
+
   const filteredTargets = useMemo(() => {
     let list = [...targets];
+    if (mode === 'all') {
+      if (storeFilter !== '전체') list = list.filter(t => t.assigned_store === storeFilter);
+      if (employeeFilter !== '전체') list = list.filter(t => t.assigned_employee === employeeFilter || t.temporary_assignee === employeeFilter);
+    }
     if (filter === '반려') list = list.filter(t => latestLogByTarget[t.id]?.review_status === '반려');
     else if (filter === '경과미완료') list = list.filter(t => !latestLogByTarget[t.id] && diffDays(t.target_date) > 0);
     else if (filter === '오늘신규') list = list.filter(t => t.target_date === todayLocalISO());
     else if (filter === '미완료전체') list = list.filter(t => !latestLogByTarget[t.id] || latestLogByTarget[t.id]?.review_status === '반려');
     else if (filter === '완료') list = list.filter(t => latestLogByTarget[t.id] && latestLogByTarget[t.id]?.review_status !== '반려');
     return list.sort((a,b)=>sortTargetsByPriority(a,b,latestLogByTarget));
-  }, [targets, latestLogByTarget, filter]);
+  }, [targets, latestLogByTarget, filter, mode, storeFilter, employeeFilter]);
 
   const title = mode === 'mine' ? '내 해피콜 리스트' : mode === 'store' ? `${user.store_name} 해피콜 진행현황` : '전체 해피콜 리스트';
 
@@ -861,6 +899,17 @@ function CallList({ user, mode, readOnly = false }) {
         <button className={filter==='완료'?'active':''} onClick={()=>setFilter('완료')}>완료 {stats.done}</button>
         <button className={filter==='전체'?'active':''} onClick={()=>setFilter('전체')}>전체 {stats.total}</button>
       </div>
+      {mode === 'all' && (
+        <div className="sectionCard allCallFilterBox">
+          <select value={storeFilter} onChange={e => { setStoreFilter(e.target.value); setEmployeeFilter('전체'); }}>
+            {storeOptions.map(v => <option key={v}>{v}</option>)}
+          </select>
+          <select value={employeeFilter} onChange={e => setEmployeeFilter(e.target.value)}>
+            {employeeOptions.map(v => <option key={v}>{v}</option>)}
+          </select>
+          <button onClick={() => { setStoreFilter('전체'); setEmployeeFilter('전체'); }}>필터 초기화</button>
+        </div>
+      )}
       <div className="list">
         {filteredTargets.map(t => {
           const log = latestLogByTarget[t.id];
@@ -868,7 +917,7 @@ function CallList({ user, mode, readOnly = false }) {
             <div className="callItem" key={t.id} onClick={()=>setSelected({ ...t, latestLog: latestLogByTarget[t.id] || null })}>
               <div>
                 <b>{t.join_no}</b>
-                <p>{t.assigned_store} · {t.assigned_employee} · {callTypeLabel(t.call_type)}</p>
+                <p>{t.assigned_store} · {t.temporary_assignee ? `${t.assigned_employee} → 임시 ${t.temporary_assignee}` : t.assigned_employee} · {callTypeLabel(t.call_type)}</p>
                 <p className="muted">대상일 {t.target_date} / {t.skip_reason || t.assign_reason || ''}</p>
                 {log?.review_status === '반려' && <p className="rejectReason">반려사유: {log.review_memo || '반려 사유 없음'}</p>}
               </div>
@@ -904,6 +953,9 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
     return history.find(h => h.review_status === '반려');
   }, [history]);
   const [script, setScript] = useState(null);
+  const [employees, setEmployees] = useState([]);
+  const [tempAssignee, setTempAssignee] = useState(target.temporary_assignee || '');
+  const [tempBusy, setTempBusy] = useState(false);
   const latestLog = target.latestLog || null;
 
   useEffect(() => { loadDetail(); }, [target.id]);
@@ -913,6 +965,8 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
     setHistory(h || []);
     const { data: s } = await supabase.from('call_scripts').select('*').eq('call_type', target.call_type).maybeSingle();
     setScript(s);
+    const { data: e } = await supabase.from('employees').select('*').eq('status', '재직').order('name');
+    setEmployees(e || []);
   }
 
   function onResultChange(v) {
@@ -921,7 +975,43 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
     setLegalRepJoinNo('');
   }
 
-  async function save() {
+  
+  const canTempAssign = (user.role === '관리자' || user.role === '점장') && isD95D185Type(target.call_type);
+
+  const tempAssigneeOptions = useMemo(() => {
+    return (employees || [])
+      .filter(e => e.store_name === target.assigned_store && e.name !== user.name)
+      .sort((a,b)=>String(a.name).localeCompare(String(b.name), 'ko'));
+  }, [employees, target.assigned_store, user.name]);
+
+  async function saveTempAssignee() {
+    if (!canTempAssign) return alert('D+95 / D+185 건만 임시 처리자 변경이 가능합니다.');
+    if (!tempAssignee) return alert('임시 처리자를 선택해주세요.');
+    if (!confirm(`${target.join_no} 건을 이번 1회만 ${tempAssignee}에게 임시 배정할까요?`)) return;
+
+    setTempBusy(true);
+    try {
+      const { error } = await supabase.from('happycall_targets').update({
+        temporary_assignee: tempAssignee,
+        temporary_assignee_store: target.assigned_store,
+        temporary_assigned_by: user.name,
+        temporary_assigned_at: new Date().toISOString(),
+        temporary_assign_reason: 'D+95/D+185 임시 처리자 변경'
+      }).eq('id', target.id);
+      if (error) throw error;
+
+      await writeAuditLog('임시처리자변경', 'happycall_target', target.id, user, `${target.join_no} / ${target.assigned_employee} → ${tempAssignee}`);
+      alert('임시 처리자가 변경되었습니다.');
+      onSaved();
+      onClose();
+    } catch (e) {
+      askErrorReport({ user, currentTab: '해피콜 상세', actionName: '임시 처리자 변경', joinNo: target.join_no, error: e });
+    } finally {
+      setTempBusy(false);
+    }
+  }
+
+async function save() {
     if (!detail) {
       alert('상세 결과를 선택해주세요.');
       return;
@@ -972,6 +1062,15 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
           memo: memo || detail || '통화 불가',
           legal_rep_join_no: null
         }, { onConflict: 'join_no' });
+
+        await supabase.from('happycall_targets')
+          .update({ is_skipped: true, skip_reason: `통화 불가 처리: ${detail}` })
+          .eq('join_no', target.join_no)
+          .neq('id', target.id)
+          .is('is_skipped', false)
+          .not('call_type', 'in', '(D+95,D+185,d95,d185,D95,D185)');
+      } else {
+        await supabase.from('refused_customers').delete().eq('join_no', target.join_no);
       }
 
       if (typeof rejectedInfo !== 'undefined' && rejectedInfo?.id) {
@@ -1013,6 +1112,19 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
           </div>
         </section>
         <section><h3>배정 사유</h3><p className="reason">{target.assign_reason || target.skip_reason || '배정 사유 없음'}</p></section>
+        {canTempAssign && (
+          <section>
+            <h3>D+95 / D+185 임시 처리자 변경</h3>
+            <div className="tempAssignBox">
+              <select value={tempAssignee} onChange={e=>setTempAssignee(e.target.value)}>
+                <option value="">같은 매장 직원 선택</option>
+                {tempAssigneeOptions.map(e => <option key={e.id || e.name} value={e.name}>{e.name}</option>)}
+              </select>
+              <button className="primary" disabled={tempBusy} onClick={saveTempAssignee}>임시 배정 저장</button>
+            </div>
+            <p className="muted">이번 리스트업 건만 1회성으로 변경되며, 원래 담당자와 향후 배정 기준은 변경되지 않습니다.</p>
+          </section>
+        )}
         {script && <section><h3>연락 스크립트</h3><div className="script"><b>{script.title}</b><p>{script.script}</p></div></section>}
         <section>
           <h3>고객 개통 이력</h3>
@@ -1513,8 +1625,31 @@ function RefusedCustomersViewer() {
 
   async function load() {
     try {
-      const data = await fetchAllRows('refused_customers', '*', 'refused_at');
-      setRows((data || []).sort((a,b)=>String(b.refused_at || '').localeCompare(String(a.refused_at || ''))));
+      const refusedRows = await fetchAllRows('refused_customers', '*', 'refused_at');
+      const logs = await fetchAllRows('happycall_logs', '*', 'checked_at');
+
+      const latestByJoinNo = {};
+      (logs || []).forEach(l => {
+        if (!l.join_no) return;
+        const prev = latestByJoinNo[l.join_no];
+        if (!prev || String(l.checked_at || '').localeCompare(String(prev.checked_at || '')) > 0) {
+          latestByJoinNo[l.join_no] = l;
+        }
+      });
+
+      const allowedDetails = new Set(['2nd디바이스', '타점 변경', '통신사 이동', '해지', '마케팅 미동의', '고객사정', '사고 발생건']);
+
+      const activeRows = (refusedRows || []).filter(r => {
+        const latest = latestByJoinNo[r.join_no];
+        if (!latest) return true;
+        if (latest.review_status === '반려') return false;
+        return latest.call_result === '통화 불가' && allowedDetails.has(latest.call_detail);
+      }).map(r => ({
+        ...r,
+        latestLog: latestByJoinNo[r.join_no] || null
+      }));
+
+      setRows(activeRows.sort((a,b)=>String(b.refused_at || '').localeCompare(String(a.refused_at || ''))));
     } catch (e) {
       alert('통화 불가 고객 조회 오류: ' + e.message);
     }
@@ -1526,7 +1661,13 @@ function RefusedCustomersViewer() {
       <div className="sectionCard">
         <table>
           <thead>
-            <tr><th>가입번호</th><th>통화불가일시(KST)</th><th>처리자</th><th>사유/메모</th></tr>
+            <tr>
+              <th>가입번호</th>
+              <th>통화불가일시(KST)</th>
+              <th>처리자</th>
+              <th>사유/메모</th>
+              <th>최신처리결과</th>
+            </tr>
           </thead>
           <tbody>
             {rows.map(r => (
@@ -1535,16 +1676,16 @@ function RefusedCustomersViewer() {
                 <td>{formatKST(r.refused_at)}</td>
                 <td>{r.refused_by || '-'}</td>
                 <td>{r.memo || '-'}</td>
+                <td>{r.latestLog ? `${r.latestLog.call_result} / ${r.latestLog.call_detail}` : '-'}</td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan="4" className="muted">통화 불가 고객이 없습니다.</td></tr>}
+            {!rows.length && <tr><td colSpan="5" className="muted">통화 불가 고객이 없습니다.</td></tr>}
           </tbody>
         </table>
       </div>
     </div>
   );
 }
-
 
 function maskSensitiveAuditDetail(detail) {
   const text = String(detail || '');
@@ -2131,7 +2272,14 @@ function ReviewDashboard({ user }) {
   }, [targets]);
 
   const baseRows = useMemo(() => {
-    return logs.map(log => ({
+    const latestByTarget = {};
+    logs.forEach(log => {
+      const prev = latestByTarget[log.target_id];
+      if (!prev || String(log.checked_at || '').localeCompare(String(prev.checked_at || '')) > 0) {
+        latestByTarget[log.target_id] = log;
+      }
+    });
+    return Object.values(latestByTarget).map(log => ({
       log,
       target: targetById[log.target_id]
     })).filter(r => r.target);
@@ -2145,7 +2293,7 @@ function ReviewDashboard({ user }) {
     let rows = [...baseRows];
 
     if (filter !== '전체') rows = rows.filter(r => (r.log.review_status || '검수대기') === filter);
-    if (employeeFilter !== '전체') rows = rows.filter(r => r.target.assigned_employee === employeeFilter);
+    if (employeeFilter !== '전체') rows = rows.filter(r => (r.target.assigned_employee === employeeFilter || r.target.temporary_assignee === employeeFilter));
     if (storeFilter !== '전체') rows = rows.filter(r => r.target.assigned_store === storeFilter);
     if (q) {
       rows = rows.filter(r => `${r.target.join_no || ''} ${r.target.assigned_employee || ''} ${r.target.assigned_store || ''} ${r.log.call_result || ''} ${r.log.call_detail || ''} ${r.log.memo || ''}`.toLowerCase().includes(q));
@@ -2882,7 +3030,7 @@ function TargetGenerator({ user }) {
       const historyMap = {};
       (histories || []).forEach(h => historyMap[h.join_no] = h);
 
-      const refusedJoinNos = new Set((refusedRows || []).map(r => String(r.join_no || '')));
+      const refusedMap = Object.fromEntries((refusedRows || []).map(r => [String(r.join_no || ''), r]));
 
       const plusMap = [
         { days: 1, type: 'D_PLUS_1' },
@@ -2900,9 +3048,8 @@ function TargetGenerator({ user }) {
 
       (customers || []).forEach(c => {
         if (!c.open_date || !c.join_no) return;
-        if (refusedJoinNos.has(String(c.join_no))) return;
-
         plusMap.forEach(p => {
+          if (shouldSkipByRefusedCustomer(c, refusedMap, p.type)) return;
           const plusDate = addDays(c.open_date, p.days);
           if (targetMonth(plusDate) === targetMonthText) {
             dPlusJoinNosThisMonth.add(c.join_no);
@@ -2929,7 +3076,7 @@ function TargetGenerator({ user }) {
       const counter = {};
       (customers || []).forEach(c => {
         if (!c.open_date || !c.join_no) return;
-        if (refusedJoinNos.has(String(c.join_no))) return;
+        if (shouldSkipByRefusedCustomer(c, refusedMap, 'MONTHLY_DAY')) return;
         if (dayOfMonth(c.open_date) !== targetDay) return;
         if (dPlusJoinNosThisMonth.has(c.join_no)) return;
 
