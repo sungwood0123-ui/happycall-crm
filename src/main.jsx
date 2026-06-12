@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v16.4-20260612022421';
+const APP_BUILD_VERSION = 'v17-20260612032140';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -34,14 +34,18 @@ async function fetchAllRows(tableName, selectText = '*', orderColumn = null) {
 
 
 const CALL_RESULTS = {
-  '통화완료': ['불만사항없음', '불만사항있음'],
+  '통화 완료': ['불만사항없음', '불만사항있음'],
   '부재중': ['카카오톡발송', '문자발송'],
-  '통화 불가': ['2nd디바이스', '타점 변경', '통신사 이동', '해지', '마케팅 미동의', '고객사정']
+  '통화 불가': ['2nd디바이스', '타점 변경', '통신사 이동', '해지', '마케팅 미동의', '고객사정', '미성년자', '사고 발생건']
 };
 
 function isUnavailableCall(result, detail) {
   return result === '통화 불가' || result === '통화거부' || detail === '통화거부' ||
-    ['2nd디바이스', '타점 변경', '통신사 이동', '해지', '마케팅 미동의', '고객사정'].includes(detail);
+    ['2nd디바이스', '타점 변경', '통신사 이동', '해지', '마케팅 미동의', '고객사정', '미성년자', '사고 발생건'].includes(detail);
+}
+
+function shouldExcludeUnavailable(detail) {
+  return isUnavailableCall('통화 불가', detail) && detail !== '미성년자';
 }
 
 class ErrorBoundary extends Component {
@@ -221,13 +225,27 @@ function askErrorReport({ user, currentTab = '', actionName = '', joinNo = '', e
 }
 
 
-function UpdateNotice() {
+function UpdateNotice({ user }) {
   const [hasUpdate, setHasUpdate] = useState(false);
   const [nextVersion, setNextVersion] = useState('');
+  const [changes, setChanges] = useState([]);
 
   useEffect(() => {
     let alive = true;
     let timer;
+
+    function filterChangesByRole(rawChanges) {
+      const role = user?.role || '직원';
+      if (!Array.isArray(rawChanges)) return [];
+
+      return rawChanges
+        .map(item => {
+          if (typeof item === 'string') return item;
+          if (item && Array.isArray(item.roles) && item.roles.includes(role)) return item.text;
+          return null;
+        })
+        .filter(Boolean);
+    }
 
     async function checkVersion() {
       try {
@@ -245,6 +263,7 @@ function UpdateNotice() {
         if (!alive) return;
         if (data.version && data.version !== APP_BUILD_VERSION) {
           setNextVersion(data.version);
+          setChanges(filterChangesByRole(data.changes));
           setHasUpdate(true);
         }
       } catch (e) {}
@@ -267,7 +286,7 @@ function UpdateNotice() {
       window.removeEventListener('focus', checkVersion);
       window.removeEventListener('pageshow', checkVersion);
     };
-  }, []);
+  }, [user?.role]);
 
   async function forceRefresh() {
     try {
@@ -287,6 +306,16 @@ function UpdateNotice() {
       <div className="updateNoticeBox">
         <h2>업데이트 내용이 있습니다</h2>
         <p>새로운 버전이 배포되었습니다. 최신 기능과 오류 수정을 반영하려면 새로고침이 필요합니다.</p>
+
+        {changes.length > 0 && (
+          <div className="updateChangeBox">
+            <h3>수정 내용</h3>
+            <ul>
+              {changes.map((item, idx) => <li key={idx}>{item}</li>)}
+            </ul>
+          </div>
+        )}
+
         <p className="muted">현재 버전: {APP_BUILD_VERSION}<br />최신 버전: {nextVersion}</p>
         <button className="primary" onClick={forceRefresh}>강제 새로고침</button>
       </div>
@@ -339,7 +368,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
   return (
     <div className="app">
       <AutoLogoutGuard onLogout={onLogout} />
-      <UpdateNotice />
+      <UpdateNotice user={user} />
       <header>
         <div>
           <h1>세찬 해피콜 관리시스템</h1>
@@ -723,6 +752,8 @@ function CallList({ user, mode, readOnly = false }) {
   const [logs, setLogs] = useState([]);
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState('미완료전체');
+  const [storeFilter, setStoreFilter] = useState('전체');
+  const [employeeFilter, setEmployeeFilter] = useState('전체');
 
   useEffect(() => { load(); }, [mode]);
 
@@ -751,15 +782,26 @@ function CallList({ user, mode, readOnly = false }) {
 
   const stats = useMemo(() => calculateCallStats(targets, latestLogByTarget), [targets, latestLogByTarget]);
 
+  const storeOptions = useMemo(() => ['전체', ...Array.from(new Set(targets.map(t => t.assigned_store).filter(Boolean))).sort((a,b)=>String(a).localeCompare(String(b), 'ko'))], [targets]);
+  const employeeOptions = useMemo(() => {
+    let base = targets;
+    if (storeFilter !== '전체') base = base.filter(t => t.assigned_store === storeFilter);
+    return ['전체', ...Array.from(new Set(base.map(t => t.assigned_employee).filter(Boolean))).sort((a,b)=>String(a).localeCompare(String(b), 'ko'))];
+  }, [targets, storeFilter]);
+
   const filteredTargets = useMemo(() => {
     let list = [...targets];
+    if (mode === 'all') {
+      if (storeFilter !== '전체') list = list.filter(t => t.assigned_store === storeFilter);
+      if (employeeFilter !== '전체') list = list.filter(t => t.assigned_employee === employeeFilter);
+    }
     if (filter === '반려') list = list.filter(t => latestLogByTarget[t.id]?.review_status === '반려');
     else if (filter === '경과미완료') list = list.filter(t => !latestLogByTarget[t.id] && diffDays(t.target_date) > 0);
     else if (filter === '오늘신규') list = list.filter(t => t.target_date === todayLocalISO());
     else if (filter === '미완료전체') list = list.filter(t => !latestLogByTarget[t.id] || latestLogByTarget[t.id]?.review_status === '반려');
     else if (filter === '완료') list = list.filter(t => latestLogByTarget[t.id] && latestLogByTarget[t.id]?.review_status !== '반려');
     return list.sort((a,b)=>sortTargetsByPriority(a,b,latestLogByTarget));
-  }, [targets, latestLogByTarget, filter]);
+  }, [targets, latestLogByTarget, filter, mode, storeFilter, employeeFilter]);
 
   const title = mode === 'mine' ? '내 해피콜 리스트' : mode === 'store' ? `${user.store_name} 해피콜 진행현황` : '전체 해피콜 리스트';
 
@@ -786,6 +828,17 @@ function CallList({ user, mode, readOnly = false }) {
         <button className={filter==='완료'?'active':''} onClick={()=>setFilter('완료')}>완료 {stats.done}</button>
         <button className={filter==='전체'?'active':''} onClick={()=>setFilter('전체')}>전체 {stats.total}</button>
       </div>
+      {mode === 'all' && (
+        <div className="sectionCard allCallFilterBox">
+          <select value={storeFilter} onChange={e => { setStoreFilter(e.target.value); setEmployeeFilter('전체'); }}>
+            {storeOptions.map(v => <option key={v}>{v}</option>)}
+          </select>
+          <select value={employeeFilter} onChange={e => setEmployeeFilter(e.target.value)}>
+            {employeeOptions.map(v => <option key={v}>{v}</option>)}
+          </select>
+          <button onClick={() => { setStoreFilter('전체'); setEmployeeFilter('전체'); }}>필터 초기화</button>
+        </div>
+      )}
       <div className="list">
         {filteredTargets.map(t => {
           const log = latestLogByTarget[t.id];
@@ -819,15 +872,20 @@ function callTypeLabel(type) {
 }
 
 function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
-  const [result, setResult] = useState('통화완료');
+  const [result, setResult] = useState('통화 완료');
   const [detail, setDetail] = useState('');
   const [memo, setMemo] = useState('');
+  const [legalRepJoinNo, setLegalRepJoinNo] = useState('');
   const [history, setHistory] = useState([]);
 
   const rejectedInfo = useMemo(() => {
     return history.find(h => h.review_status === '반려');
   }, [history]);
   const [script, setScript] = useState(null);
+  const [employees, setEmployees] = useState([]);
+  const [assignStore, setAssignStore] = useState(target.assigned_store || '');
+  const [assignEmployee, setAssignEmployee] = useState(target.assigned_employee || '');
+  const [assignBusy, setAssignBusy] = useState(false);
 
   useEffect(() => { loadDetail(); }, [target.id]);
 
@@ -836,14 +894,60 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
     setHistory(h || []);
     const { data: s } = await supabase.from('call_scripts').select('*').eq('call_type', target.call_type).maybeSingle();
     setScript(s);
+    const { data: e } = await supabase.from('employees').select('*').eq('status', '재직').order('name');
+    setEmployees(e || []);
   }
 
   function onResultChange(v) {
     setResult(v);
     setDetail('');
+    setLegalRepJoinNo('');
   }
 
-  async function save() {
+  
+  const assignStoreOptions = useMemo(() => {
+    return Array.from(new Set((employees || []).map(e => e.store_name).filter(Boolean))).sort((a,b)=>String(a).localeCompare(String(b), 'ko'));
+  }, [employees]);
+
+  const assignEmployeeOptions = useMemo(() => {
+    let base = (employees || []).filter(e => !assignStore || e.store_name === assignStore);
+    return base.sort((a,b)=>String(a.name).localeCompare(String(b.name), 'ko'));
+  }, [employees, assignStore]);
+
+  async function saveAssignment() {
+    if (user.role !== '관리자') return alert('관리자만 담당자를 변경할 수 있습니다.');
+    if (!assignStore || !assignEmployee) return alert('변경할 매장과 담당자를 선택해주세요.');
+    if (!confirm(`${target.join_no} 담당자를 ${assignStore} / ${assignEmployee}(으)로 변경할까요?`)) return;
+
+    setAssignBusy(true);
+    try {
+      const { error } = await supabase.from('happycall_targets').update({
+        assigned_store: assignStore,
+        assigned_employee: assignEmployee,
+        skip_reason: `관리자 담당자 변경: ${user.name}`
+      }).eq('id', target.id);
+      if (error) throw error;
+
+      await supabase.from('assignment_history').upsert({
+        join_no: target.join_no,
+        assigned_store: assignStore,
+        assigned_employee: assignEmployee,
+        assign_reason: `관리자 담당자 변경: ${user.name}`,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'join_no' });
+
+      await writeAuditLog('해피콜담당자변경', 'happycall_target', target.id, user, `${target.join_no} / ${target.assigned_store} ${target.assigned_employee} → ${assignStore} ${assignEmployee}`);
+      alert('담당자가 변경되었습니다.');
+      onSaved();
+      onClose();
+    } catch (e) {
+      askErrorReport({ user, currentTab: '해피콜 상세', actionName: '담당자 변경', joinNo: target.join_no, error: e });
+    } finally {
+      setAssignBusy(false);
+    }
+  }
+
+async function save() {
     if (!detail) {
       alert('상세 결과를 선택해주세요.');
       return;
@@ -859,6 +963,16 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
       return;
     }
 
+    if (detail === '사고 발생건' && !memo.trim()) {
+      alert('사고 발생건 선택 시 메모를 입력해야 합니다.');
+      return;
+    }
+
+    if (detail === '미성년자' && !legalRepJoinNo.trim()) {
+      alert('미성년자 선택 시 법정대리인 가입번호를 입력해야 합니다.');
+      return;
+    }
+
     try {
       const payload = {
         target_id: target.id,
@@ -868,19 +982,21 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
         call_detail: detail,
         memo,
         checked_by: user.name,
-        review_status: '검수대기'
+        review_status: '검수대기',
+        legal_rep_join_no: detail === '미성년자' ? legalRepJoinNo.trim() : null
       };
 
       const { error } = await supabase.from('happycall_logs').insert(payload);
       if (error) throw error;
 
-      if (isUnavailableCall(result, detail)) {
+      if (shouldExcludeUnavailable(detail)) {
         await supabase.from('refused_customers').upsert({
           join_no: target.join_no,
           target_id: target.id,
           refused_by: user.name,
           refused_at: new Date().toISOString(),
-          memo: memo || detail || '통화 불가'
+          memo: memo || detail || '통화 불가',
+          legal_rep_join_no: null
         }, { onConflict: 'join_no' });
       }
 
@@ -917,11 +1033,28 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
           <div className="infoGrid">
             <p><b>가입번호</b><br />{target.join_no}</p>
             <p><b>대상일</b><br />{target.target_date}</p>
+            {log.legal_rep_join_no && <p><b>법정대리인 가입번호</b><br />{log.legal_rep_join_no}</p>}
             <p><b>유형</b><br />{callTypeLabel(target.call_type)}</p>
             <p><b>담당자</b><br />{target.assigned_employee}</p>
           </div>
         </section>
         <section><h3>배정 사유</h3><p className="reason">{target.assign_reason || target.skip_reason || '배정 사유 없음'}</p></section>
+        {user.role === '관리자' && (
+          <section>
+            <h3>해피콜 담당자 변경</h3>
+            <div className="assignmentChangeBox">
+              <select value={assignStore} onChange={e => { setAssignStore(e.target.value); setAssignEmployee(''); }}>
+                <option value="">매장 선택</option>
+                {assignStoreOptions.map(v => <option key={v}>{v}</option>)}
+              </select>
+              <select value={assignEmployee} onChange={e => setAssignEmployee(e.target.value)}>
+                <option value="">담당자 선택</option>
+                {assignEmployeeOptions.map(e => <option key={e.id || e.name} value={e.name}>{e.name}</option>)}
+              </select>
+              <button className="primary" onClick={saveAssignment} disabled={assignBusy}>담당자 변경 저장</button>
+            </div>
+          </section>
+        )}
         {script && <section><h3>연락 스크립트</h3><div className="script"><b>{script.title}</b><p>{script.script}</p></div></section>}
         <section>
           <h3>고객 개통 이력</h3>
@@ -943,11 +1076,16 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
             <p className="muted">점장 확인 화면에서는 수정할 수 없습니다. 직원 본인만 내 해피콜 탭에서 결과를 입력할 수 있습니다.</p>
           ) : (
             <>
-              <select value={result} onChange={e => onResultChange(e.target.value)}>{Object.keys(CALL_RESULTS).map(v => <option key={v}>{v}</option>)}</select>
+              <select className={`callResultSelect ${result === '통화 완료' || result === '통화완료' ? 'success' : result === '부재중' ? 'warning' : result === '통화 불가' ? 'danger' : ''}`} value={result} onChange={e => onResultChange(e.target.value)}>
+                {Object.keys(CALL_RESULTS).map(v => <option key={v}>{v}</option>)}
+              </select>
               <select value={detail} onChange={e => setDetail(e.target.value)}>
                 <option value="">상세 결과 선택</option>
                 {CALL_RESULTS[result].map(v => <option key={v}>{v}</option>)}
               </select>
+              {detail === '미성년자' && (
+                <input value={legalRepJoinNo} onChange={e => setLegalRepJoinNo(e.target.value)} placeholder="법정대리인 가입번호 입력" />
+              )}
               <textarea value={memo} onChange={e => setMemo(e.target.value)} placeholder="메모 입력" />
               <button className="primary" onClick={save}>저장</button>
             </>
@@ -1988,6 +2126,10 @@ function ReviewModal({ item, user, onClose, onSaved }) {
 
       if (error) throw error;
 
+      if (isUnavailableCall(log.call_result, log.call_detail)) {
+        await supabase.from('refused_customers').delete().eq('join_no', target.join_no);
+      }
+
       await writeAuditLog('검수반려', 'happycall_log', log.id, user, `${target.join_no} / ${target.assigned_employee} / 반려사유: ${memo}`);
       alert('반려 처리되었습니다.');
       onSaved();
@@ -2862,7 +3004,7 @@ function ManagerStoreDashboard({ user }) {
       </div>
       <div className="sectionCard">
         <h3>매장 해피콜 리스트</h3>
-        <table><thead><tr><th>가입번호</th><th>담당자</th><th>유형</th><th>대상일</th><th>상태</th><th>결과</th></tr></thead>
+        <table><thead><tr><th>가입번호</th><th>법정대리인</th><th>담당자</th><th>유형</th><th>대상일</th><th>상태</th><th>결과</th></tr></thead>
         <tbody>{targets.map(t => { const log = latestLogByTarget[t.id]; return <tr key={t.id} onClick={()=>setSelected(t)} className="clickableRow"><td>{t.join_no}</td><td>{t.assigned_employee}</td><td>{callTypeLabel(t.call_type)}</td><td>{t.target_date}</td><td>{log ? '완료' : '미완료'}</td><td>{log ? `${log.call_result} / ${log.call_detail}` : '-'}</td></tr> })}</tbody></table>
       </div>
       {selected && <CallModal target={selected} user={user} onClose={() => setSelected(null)} onSaved={load} readOnly={true} />}
