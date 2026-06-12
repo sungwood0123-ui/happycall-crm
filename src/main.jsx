@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v16.1-20260611095930';
+const APP_BUILD_VERSION = 'v16.4-20260612022421';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -227,12 +227,18 @@ function UpdateNotice() {
 
   useEffect(() => {
     let alive = true;
+    let timer;
 
     async function checkVersion() {
       try {
-        const res = await fetch(`/version.json?ts=${Date.now()}`, {
+        const url = `/version.json?version_check=${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        const res = await fetch(url, {
           cache: 'no-store',
-          headers: { 'Cache-Control': 'no-cache' }
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -241,28 +247,37 @@ function UpdateNotice() {
           setNextVersion(data.version);
           setHasUpdate(true);
         }
-      } catch (e) {
-        // 버전 확인 실패는 사용자 작업을 막지 않음
-      }
+      } catch (e) {}
+    }
+
+    function handleVisible() {
+      if (document.visibilityState === 'visible') checkVersion();
     }
 
     checkVersion();
-    const timer = setInterval(checkVersion, 60 * 1000);
+    timer = setInterval(checkVersion, 60 * 1000);
+    document.addEventListener('visibilitychange', handleVisible);
+    window.addEventListener('focus', checkVersion);
+    window.addEventListener('pageshow', checkVersion);
 
     return () => {
       alive = false;
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisible);
+      window.removeEventListener('focus', checkVersion);
+      window.removeEventListener('pageshow', checkVersion);
     };
   }, []);
 
-  function forceRefresh() {
-    if ('caches' in window) {
-      caches.keys().then(keys => Promise.all(keys.map(key => caches.delete(key)))).finally(() => {
-        window.location.reload(true);
-      });
-    } else {
-      window.location.reload(true);
-    }
+  async function forceRefresh() {
+    try {
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(key => caches.delete(key)));
+      }
+    } catch (e) {}
+
+    window.location.replace(`${window.location.origin}${window.location.pathname}?app_refresh=${Date.now()}`);
   }
 
   if (!hasUpdate) return null;
