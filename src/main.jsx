@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v23-20260615082818';
+const APP_BUILD_VERSION = 'v24-20260615084217';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -846,7 +846,12 @@ function CallList({ user, mode, readOnly = false }) {
     try {
       let allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
       let visible = (allTargets || []).filter(t => !t.is_skipped);
-      if (mode === 'mine') visible = visible.filter(t => t.assigned_employee === user.name || t.temporary_assignee === user.name);
+      if (mode === 'mine') {
+        visible = visible.filter(t => {
+          if (t.temporary_assignee) return t.temporary_assignee === user.name;
+          return t.assigned_employee === user.name;
+        });
+      }
       if (mode === 'store') visible = visible.filter(t => t.assigned_store === user.store_name);
       const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
       const customers = await fetchAllRows('customers', '*', 'open_date');
@@ -1405,7 +1410,7 @@ async function save() {
                   <div className="minorInputGroup">
                     <label className="minorFieldLabel">* 미성년자 생년월일 입력</label>
                     <input type="date" value={minorBirthDate} onChange={e => setMinorBirthDate(e.target.value)} className="requiredInput" />
-                    <p className="fieldHelpText">생일이 지나 성인이 되면 미성년자 배지에서 자동 제외</p>
+                    
                   </div>
                 </div>
               )}

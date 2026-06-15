@@ -2199,3 +2199,71 @@ input.requiredInput::placeholder{
     font-size:20px !important;
   }
 }
+
+/* V24 spacing and temp assignment visibility polish */
+.modal section{
+  margin-top:14px !important;
+  margin-bottom:14px !important;
+}
+
+.modal section + section{
+  margin-top:16px !important;
+}
+
+.infoGrid,
+.callHistoryBox,
+.reason,
+.uploadBox,
+.sectionCard{
+  margin-top:10px;
+}
+
+.callHistoryBox{
+  padding:14px !important;
+  border-radius:14px !important;
+}
+
+.historyTimeline{
+  margin-top:8px !important;
+}
+
+.resultMinorRow{
+  margin-top:8px !important;
+}
+
+.minorInfoBox{
+  margin-top:12px !important;
+  margin-bottom:10px !important;
+}
+
+.minorInputGroup{
+  gap:5px !important;
+}
+
+.fieldHelpText:empty{
+  display:none !important;
+}
+
+.minorInputGroup .fieldHelpText{
+  margin-top:0 !important;
+}
+
+/* Birth-date helper removed: keep only legal-rep helper visually compact */
+.minorInfoBox .minorInputGroup:nth-child(2) .fieldHelpText{
+  display:none !important;
+}
+
+@media (max-width:768px){
+  .modal section{
+    margin-top:16px !important;
+    margin-bottom:16px !important;
+  }
+
+  .callHistoryBox{
+    padding:12px !important;
+  }
+
+  .modal section + section{
+    margin-top:18px !important;
+  }
+}
