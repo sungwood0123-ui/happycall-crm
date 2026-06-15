@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v22-20260615080115';
+const APP_BUILD_VERSION = 'v23-20260615082818';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -1399,11 +1399,13 @@ async function save() {
                 <div className="minorInfoBox">
                   <div className="minorInputGroup">
                     <label className="minorFieldLabel">* 법정대리인 가입번호 입력</label>
-                    <input value={legalRepJoinNo} onChange={e => setLegalRepJoinNo(e.target.value.replace(/\D/g, ''))} className="requiredInput" placeholder="해당 칸에 작성 필수 · 법정대리인 가입번호 10자리 또는 12자리" />
+                    <input value={legalRepJoinNo} onChange={e => setLegalRepJoinNo(e.target.value.replace(/\D/g, ''))} className="requiredInput" placeholder="법정대리인 가입번호 입력" />
+                    <p className="fieldHelpText">해당 칸에 작성 필수 · 10자리 또는 12자리만 저장 가능</p>
                   </div>
                   <div className="minorInputGroup">
                     <label className="minorFieldLabel">* 미성년자 생년월일 입력</label>
                     <input type="date" value={minorBirthDate} onChange={e => setMinorBirthDate(e.target.value)} className="requiredInput" />
+                    <p className="fieldHelpText">생일이 지나 성인이 되면 미성년자 배지에서 자동 제외</p>
                   </div>
                 </div>
               )}

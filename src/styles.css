@@ -1963,3 +1963,239 @@ input.requiredInput::placeholder{
     grid-template-columns:1fr !important;
   }
 }
+
+/* V23 responsive UI polish: PC and mobile are intentionally different layouts */
+:root{
+  --control-h:44px;
+  --control-radius:12px;
+  --control-font:14px;
+}
+
+/* Shared control standard */
+.modal select,
+.modal input,
+.modal button,
+.modal textarea{
+  box-sizing:border-box;
+}
+
+.modal select,
+.modal input:not([type="checkbox"]),
+.modal button{
+  min-height:var(--control-h);
+}
+
+.resultMinorRow{
+  display:grid !important;
+  grid-template-columns:180px max-content !important;
+  gap:10px !important;
+  align-items:center !important;
+  width:100% !important;
+}
+
+.callResultSelect.compact{
+  width:180px !important;
+  min-width:180px !important;
+  max-width:180px !important;
+  height:var(--control-h) !important;
+  min-height:var(--control-h) !important;
+  border-radius:var(--control-radius) !important;
+  font-size:var(--control-font) !important;
+  margin:0 !important;
+}
+
+.minorCheckLabel{
+  height:var(--control-h) !important;
+  min-height:var(--control-h) !important;
+  width:auto !important;
+  min-width:112px !important;
+  max-width:140px !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  gap:7px !important;
+  padding:0 12px !important;
+  margin:0 !important;
+  box-sizing:border-box !important;
+  border:1px solid #e5e7eb !important;
+  border-radius:var(--control-radius) !important;
+  background:#fff !important;
+  color:#111827 !important;
+  font-size:var(--control-font) !important;
+  font-weight:800 !important;
+  line-height:1 !important;
+  white-space:nowrap !important;
+  word-break:keep-all !important;
+  overflow:hidden !important;
+}
+
+.minorCheckLabel input{
+  width:16px !important;
+  height:16px !important;
+  flex:0 0 16px !important;
+  margin:0 !important;
+  padding:0 !important;
+  position:static !important;
+  transform:none !important;
+}
+
+.minorInfoBox{
+  display:grid !important;
+  grid-template-columns:minmax(260px, 1fr) minmax(190px, 240px) !important;
+  gap:12px !important;
+  align-items:start !important;
+  width:100% !important;
+  margin-top:12px !important;
+}
+
+.minorInputGroup{
+  display:flex !important;
+  flex-direction:column !important;
+  gap:5px !important;
+  min-width:0 !important;
+  width:100% !important;
+}
+
+.minorFieldLabel{
+  font-size:12px !important;
+  font-weight:900 !important;
+  color:#dc2626 !important;
+  line-height:1.25 !important;
+  margin:0 !important;
+  white-space:nowrap !important;
+  word-break:keep-all !important;
+}
+
+.fieldHelpText{
+  margin:0 !important;
+  font-size:11px !important;
+  line-height:1.3 !important;
+  color:#6b7280 !important;
+  word-break:keep-all !important;
+}
+
+.minorInputGroup input{
+  width:100% !important;
+  height:var(--control-h) !important;
+  min-height:var(--control-h) !important;
+  border-radius:var(--control-radius) !important;
+  font-size:var(--control-font) !important;
+  margin:0 !important;
+}
+
+/* modal spacing polish */
+.callHistoryBox{
+  padding:12px !important;
+}
+.callHistoryBox .muted{
+  margin:4px 0 !important;
+}
+.modal .primary,
+.modal button{
+  align-items:center;
+  justify-content:center;
+}
+
+/* Mobile layout: controls are stacked, not squeezed */
+@media (max-width:768px){
+  .modal{
+    width:calc(100vw - 28px) !important;
+    max-width:calc(100vw - 28px) !important;
+    padding:16px !important;
+    border-radius:18px !important;
+  }
+
+  .modalHead{
+    display:flex !important;
+    align-items:center !important;
+    justify-content:space-between !important;
+    gap:10px !important;
+  }
+
+  .modalHead h2{
+    font-size:22px !important;
+    line-height:1.2 !important;
+    margin:0 !important;
+  }
+
+  .modalHeadBtns{
+    display:flex !important;
+    gap:8px !important;
+    flex:0 0 auto !important;
+  }
+
+  .modalHeadBtns button{
+    height:42px !important;
+    min-height:42px !important;
+    padding:0 12px !important;
+    font-size:13px !important;
+    white-space:nowrap !important;
+  }
+
+  .resultMinorRow{
+    grid-template-columns:1fr !important;
+    gap:8px !important;
+  }
+
+  .callResultSelect.compact{
+    width:100% !important;
+    min-width:0 !important;
+    max-width:none !important;
+  }
+
+  .minorCheckLabel{
+    width:100% !important;
+    max-width:none !important;
+    justify-content:center !important;
+    min-width:0 !important;
+  }
+
+  .minorInfoBox{
+    grid-template-columns:1fr !important;
+    gap:10px !important;
+  }
+
+  .minorFieldLabel{
+    white-space:normal !important;
+  }
+
+  .fieldHelpText{
+    white-space:normal !important;
+  }
+
+  .minorInputGroup input{
+    width:100% !important;
+  }
+
+  .modal textarea{
+    min-height:96px !important;
+  }
+
+  .modal section{
+    margin-bottom:14px !important;
+  }
+
+  .modal .primary{
+    width:100% !important;
+    min-height:48px !important;
+    font-size:15px !important;
+  }
+}
+
+/* Small mobile safety */
+@media (max-width:430px){
+  .modal{
+    width:calc(100vw - 18px) !important;
+    max-width:calc(100vw - 18px) !important;
+    padding:12px !important;
+  }
+
+  .modalHeadBtns button{
+    padding:0 10px !important;
+    font-size:12px !important;
+  }
+
+  .modalHead h2{
+    font-size:20px !important;
+  }
+}
