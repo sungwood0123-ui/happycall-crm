@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v20-20260615063030';
+const APP_BUILD_VERSION = 'v21-20260615074415';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -1064,11 +1064,57 @@ function BulkTempAssignModal({ user, targets, latestLogByTarget, onClose, onSave
   );
 }
 
+
+function CallHistoryList({ targetId }) {
+  const [logs, setLogs] = useState([]);
+
+  useEffect(() => { load(); }, [targetId]);
+
+  async function load() {
+    const { data, error } = await supabase
+      .from('happycall_logs')
+      .select('*')
+      .eq('target_id', targetId)
+      .order('checked_at', { ascending: true })
+      .order('id', { ascending: true });
+    if (!error) setLogs(data || []);
+  }
+
+  if (!logs.length) return <p className="muted">처리 이력이 없습니다.</p>;
+
+  return (
+    <div className="historyTimeline">
+      {logs.map((log, idx) => (
+        <div className="historyStep" key={log.id || idx}>
+          <h4>{idx + 1}차 저장내용</h4>
+          <p><b>저장일시</b> {formatKST(log.checked_at)}</p>
+          <p><b>처리자</b> {log.employee_name || log.checked_by || '-'}</p>
+          <p><b>결과</b> {log.call_result} / {log.call_detail}</p>
+          {log.memo && <p><b>메모</b> {log.memo}</p>}
+          {hasMinorInfo(log) && (
+            <p><b>미성년자 정보</b> {isActiveMinor(log.minor_birth_date) ? '미성년자' : '생일 경과/확인 필요'} / 생년월일 {log.minor_birth_date || '-'} / 법정대리인 {log.legal_rep_join_no || '-'}</p>
+          )}
+          {log.review_status === '반려' && (
+            <div className="historyReject">
+              <h4>{idx + 1}차 반려내용</h4>
+              <p><b>반려사유</b> {log.review_memo || '반려 사유 없음'}</p>
+              {log.reviewed_by && <p><b>검수자</b> {log.reviewed_by}</p>}
+              {log.reviewed_at && <p><b>반려일시</b> {formatKST(log.reviewed_at)}</p>}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
   const [result, setResult] = useState('통화 완료');
   const [detail, setDetail] = useState('');
   const [memo, setMemo] = useState('');
   const [legalRepJoinNo, setLegalRepJoinNo] = useState('');
+  const [isMinorChecked, setIsMinorChecked] = useState(false);
+  const [minorBirthDate, setMinorBirthDate] = useState('');
   const [history, setHistory] = useState([]);
   const [editJoinNoOpen, setEditJoinNoOpen] = useState(false);
   const [newJoinNo, setNewJoinNo] = useState(target.join_no || '');
@@ -1084,6 +1130,13 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
   const latestLog = target.latestLog || null;
 
   useEffect(() => { loadDetail(); }, [target.id]);
+  useEffect(() => {
+    if (latestLog?.is_minor || latestLog?.minor_birth_date || target.minor_birth_date || latestLog?.legal_rep_join_no || target.legal_rep_join_no) {
+      setIsMinorChecked(true);
+      setLegalRepJoinNo(latestLog?.legal_rep_join_no || target.legal_rep_join_no || '');
+      setMinorBirthDate(latestLog?.minor_birth_date || target.minor_birth_date || '');
+    }
+  }, [target.id]);
 
   async function loadDetail() {
     const { data: h } = await supabase.from('customers').select('*').eq('join_no', target.join_no).order('open_date', { ascending: false });
@@ -1097,7 +1150,7 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
   function onResultChange(v) {
     setResult(v);
     setDetail('');
-    setLegalRepJoinNo('');
+    // 결과 변경 시 미성년자 정보 유지;
   }
 
   
@@ -1177,9 +1230,15 @@ async function save() {
       return;
     }
 
-    if (detail === '미성년자' && !legalRepJoinNo.trim()) {
-      alert('미성년자 선택 시 법정대리인 가입번호를 입력해야 합니다.');
-      return;
+    if (isMinorChecked) {
+      if (!isValidLegalRepJoinNo(legalRepJoinNo)) {
+        alert('법정대리인 가입번호는 10자리 또는 12자리만 입력 가능합니다.');
+        return;
+      }
+      if (!minorBirthDate) {
+        alert('미성년자 생년월일을 입력해야 합니다.');
+        return;
+      }
     }
 
     try {
@@ -1192,11 +1251,28 @@ async function save() {
         memo,
         checked_by: user.name,
         review_status: '검수대기',
-        legal_rep_join_no: detail === '미성년자' ? legalRepJoinNo.trim() : null
+        legal_rep_join_no: isMinorChecked ? legalRepJoinNo.trim() : null,
+        is_minor: isMinorChecked,
+        minor_birth_date: isMinorChecked ? minorBirthDate : null
       };
 
-      const { error } = await supabase.from('happycall_logs').insert(payload);
-      if (error) throw error;
+      let saveError = null;
+      const existingPending = latestLog && (latestLog.review_status || '검수대기') === '검수대기' ? latestLog : null;
+      if (existingPending) {
+        const { error } = await supabase.from('happycall_logs').update({
+          ...payload,
+          checked_at: new Date().toISOString()
+        }).eq('id', existingPending.id);
+        saveError = error;
+      } else {
+        const { error } = await supabase.from('happycall_logs').insert({
+          ...payload,
+          parent_log_id: latestLog?.review_status === '반려' ? latestLog.id : null,
+          review_round: latestLog?.review_status === '반려' ? (Number(latestLog.review_round || 1) + 1) : 1
+        });
+        saveError = error;
+      }
+      if (saveError) throw saveError;
 
       if (shouldExcludeUnavailable(detail)) {
         await supabase.from('refused_customers').upsert({
@@ -1260,7 +1336,9 @@ async function save() {
           <div className="infoGrid">
             <p><b>가입번호</b><br />{target.customer_name ? `${target.customer_name} (${target.join_no})` : target.join_no}</p>
             <p><b>대상일</b><br />{target.target_date}</p>
-            {latestLog?.legal_rep_join_no && <p><b>법정대리인 가입번호</b><br />{latestLog?.legal_rep_join_no}</p>}
+            {hasMinorInfo(latestLog || target) && <p><b>미성년자</b><br />{isActiveMinor(latestLog?.minor_birth_date || target.minor_birth_date) ? '예' : '생일 경과/확인 필요'}</p>}
+            {(latestLog?.minor_birth_date || target.minor_birth_date) && <p><b>미성년자 생년월일</b><br />{latestLog?.minor_birth_date || target.minor_birth_date}</p>}
+            {(latestLog?.legal_rep_join_no || target.legal_rep_join_no) && <p><b>법정대리인 가입번호</b><br />{latestLog?.legal_rep_join_no || target.legal_rep_join_no}</p>}
             <p><b>유형</b><br />{callTypeLabel(target.call_type)}</p>
             <p><b>담당자</b><br />{target.assigned_employee}</p>
           </div>
@@ -1294,15 +1372,20 @@ async function save() {
           </section>
         )}
 
+        <section className="callHistoryBox"><h3>처리 이력</h3><CallHistoryList targetId={target.id} /></section>
+
         <section>
           <h3>통화 결과</h3>
           {readOnly ? (
             <p className="muted">점장 확인 화면에서는 수정할 수 없습니다. 직원 본인만 내 해피콜 탭에서 결과를 입력할 수 있습니다.</p>
           ) : (
             <>
-              <select className={`callResultSelect ${result === '통화 완료' || result === '통화완료' ? 'success' : result === '부재중' ? 'warning' : result === '통화 불가' ? 'danger' : ''}`} value={result} onChange={e => onResultChange(e.target.value)}>
-                {Object.keys(CALL_RESULTS).map(v => <option key={v} className={v === '통화 완료' || v === '통화완료' ? 'optionSuccess' : v === '부재중' ? 'optionWarning' : v === '통화 불가' ? 'optionDanger' : ''}>{v}</option>)}
-              </select>
+              <div className="resultMinorRow">
+                <select className={`callResultSelect compact ${result === '통화 완료' || result === '통화완료' ? 'success' : result === '부재중' ? 'warning' : result === '통화 불가' ? 'danger' : ''}`} value={result} onChange={e => onResultChange(e.target.value)}>
+                  {Object.keys(CALL_RESULTS).map(v => <option key={v} className={v === '통화 완료' || v === '통화완료' ? 'optionSuccess' : v === '부재중' ? 'optionWarning' : v === '통화 불가' ? 'optionDanger' : ''}>{v}</option>)}
+                </select>
+                <label className="minorCheckLabel"><input type="checkbox" checked={isMinorChecked} onChange={e=>setIsMinorChecked(e.target.checked)} /> 미성년자</label>
+              </div>
               <div className="callResultLegend">
                 <span className="success">통화 완료</span>
                 <span className="warning">부재중</span>
@@ -1312,8 +1395,11 @@ async function save() {
                 <option value="">상세 결과 선택</option>
                 {CALL_RESULTS[result].map(v => <option key={v}>{v}</option>)}
               </select>
-              {detail === '미성년자' && (
-                <input value={legalRepJoinNo} onChange={e => setLegalRepJoinNo(e.target.value)} className={detail === '미성년자' ? 'requiredInput' : ''} placeholder="작성 필수 · 법정대리인 가입번호 입력" />
+              {isMinorChecked && (
+                <div className="minorInfoBox">
+                  <input value={legalRepJoinNo} onChange={e => setLegalRepJoinNo(e.target.value.replace(/\D/g, ''))} className="requiredInput" placeholder="작성 필수 · 법정대리인 가입번호 10자리 또는 12자리" />
+                  <input type="date" value={minorBirthDate} onChange={e => setMinorBirthDate(e.target.value)} className="requiredInput" />
+                </div>
               )}
               <textarea className={detail === '불만사항있음' || detail === '고객사정' || detail === '사고 발생건' ? 'requiredInput' : ''} value={memo} onChange={e => setMemo(e.target.value)} placeholder={detail === '불만사항있음' || detail === '고객사정' || detail === '사고 발생건' ? '작성 필수 · 메모 입력' : '메모 입력'} />
               <button className="primary" onClick={save}>저장</button>
@@ -1833,7 +1919,7 @@ function RefusedCustomersViewer() {
                 <td>{formatKST(r.refused_at)}</td>
                 <td>{r.refused_by || '-'}</td>
                 <td>{r.memo || '-'}</td>
-                <td>{r.latestLog ? `${r.latestLog.call_result} / ${r.latestLog.call_detail}` : '-'}</td>
+                <td>{r.latestLog ? `${r.latestLog.call_result} / ${r.latestLog.call_detail}` : '-'} {hasMinorInfo(r.latestLog || r) && isActiveMinor((r.latestLog || r).minor_birth_date) && <span className="minorBadge">미성년자</span>}</td>
               </tr>
             ))}
             {!rows.length && <tr><td colSpan="5" className="muted">통화 불가 고객이 없습니다.</td></tr>}
@@ -2616,7 +2702,7 @@ function ReviewDashboard({ user }) {
     if (employeeFilter !== '전체') rows = rows.filter(r => (r.target.assigned_employee === employeeFilter || r.target.temporary_assignee === employeeFilter));
     if (storeFilter !== '전체') rows = rows.filter(r => r.target.assigned_store === storeFilter);
     if (q) {
-      rows = rows.filter(r => `${r.target.join_no || ''} ${getCustomerNameForJoinNo(r.target.join_no, customersByJoinNo)} ${r.target.assigned_employee || ''} ${r.target.assigned_store || ''} ${r.log.call_result || ''} ${r.log.call_detail || ''} ${r.log.memo || ''}`.toLowerCase().includes(q));
+      rows = rows.filter(r => `${r.target.join_no || ''} ${getCustomerNameForJoinNo(r.target.join_no, customersByJoinNo)} ${r.target.assigned_employee || ''} ${r.target.assigned_store || ''} ${r.log.call_result || ''} ${r.log.call_detail || ''} ${r.log.memo || ''} ${hasMinorInfo(r.log) ? '미성년자' : ''}`.toLowerCase().includes(q));
     }
 
     rows.sort((a, b) => String(b.log.checked_at || '').localeCompare(String(a.log.checked_at || '')));
@@ -3259,6 +3345,28 @@ function resolveD95D185Assignee({ customer, employees, employeeHistories }) {
 
 
 
+
+function isValidLegalRepJoinNo(value) {
+  const v = String(value || '').replace(/\D/g, '');
+  return v.length === 10 || v.length === 12;
+}
+function ageByBirthDate(birthDate) {
+  if (!birthDate) return null;
+  const today = new Date();
+  const b = new Date(`${birthDate}T00:00:00`);
+  if (Number.isNaN(b.getTime())) return null;
+  let age = today.getFullYear() - b.getFullYear();
+  const m = today.getMonth() - b.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < b.getDate())) age--;
+  return age;
+}
+function isActiveMinor(birthDate) {
+  const age = ageByBirthDate(birthDate);
+  return age !== null && age < 19;
+}
+function hasMinorInfo(row = {}) {
+  return !!(row.is_minor || row.minor_birth_date || row.legal_rep_join_no);
+}
 function getCustomerNameForJoinNo(joinNo, customersByJoinNo = {}) {
   const c = customersByJoinNo?.[joinNo];
   return c?.customer_name || c?.name || c?.customerName || '';

@@ -1807,3 +1807,83 @@ input.requiredInput::placeholder{
 .joinNoEditBox textarea{
   min-height:72px;
 }
+
+/* V21 minor/review history */
+.resultMinorRow{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.callResultSelect.compact{
+  max-width:180px !important;
+  width:180px !important;
+}
+.minorCheckLabel{
+  height:40px;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-weight:800;
+  padding:0 10px;
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  background:#f9fafb;
+}
+.minorInfoBox{
+  display:grid;
+  grid-template-columns:1fr 180px;
+  gap:8px;
+  margin-top:8px;
+}
+.minorBadge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin-left:6px;
+  padding:2px 7px;
+  border-radius:999px;
+  background:#fef3c7;
+  color:#92400e;
+  font-size:11px;
+  font-weight:900;
+  white-space:nowrap;
+}
+.callHistoryBox{
+  background:#f8fafc;
+  border:1px solid #e2e8f0;
+  border-radius:14px;
+  padding:12px;
+}
+.historyTimeline{
+  display:grid;
+  gap:10px;
+}
+.historyStep{
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:12px;
+  padding:10px;
+}
+.historyStep h4{
+  margin:0 0 6px;
+}
+.historyStep p{
+  margin:4px 0;
+}
+.historyReject{
+  margin-top:8px;
+  padding:8px;
+  border-radius:10px;
+  background:#fff1f2;
+  border:1px solid #fecdd3;
+}
+@media (max-width:768px){
+  .callResultSelect.compact{
+    width:100% !important;
+    max-width:none !important;
+  }
+  .minorInfoBox{
+    grid-template-columns:1fr;
+  }
+}
