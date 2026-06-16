@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v26-20260616050154';
+const APP_BUILD_VERSION = 'v27-20260616070039';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -268,8 +268,47 @@ function PasswordChangeModal({ user, onClose, onUserUpdate }) {
 
 async function saveErrorReport({ user, currentTab = '', actionName = '', joinNo = '', error }) {
   const message = error?.message || String(error || '알 수 없는 오류');
+  const errorHash = createErrorFingerprint({ currentTab, actionName, joinNo, error });
+
   try {
-    await supabase.from('error_reports').insert({
+    // 동일 직원/동일 오류는 1분 이내 재전송 차단
+    if (wasErrorReportedWithinOneMinute(errorHash, user?.name)) {
+      alert('이미 접수된 오류입니다.\n\n동일 오류는 1분 이내 다시 접수되지 않습니다.');
+      return;
+    }
+
+    // 접수 상태의 동일 오류가 있으면 새로 만들지 않고 발생횟수만 증가
+    const { data: existing, error: findError } = await supabase
+      .from('error_reports')
+      .select('*')
+      .eq('error_hash', errorHash)
+      .eq('status', '접수')
+      .order('created_at', { ascending: true })
+      .limit(1);
+
+    if (findError && !String(findError.message || '').includes('error_hash')) throw findError;
+
+    if (existing && existing.length) {
+      const row = existing[0];
+      const nextCount = Number(row.occurrence_count || 1) + 1;
+      const { error: updateError } = await supabase
+        .from('error_reports')
+        .update({
+          occurrence_count: nextCount,
+          last_occurred_at: new Date().toISOString(),
+          last_reporter_name: user?.name || '',
+          last_reporter_store: user?.store_name || '',
+          last_user_agent: navigator.userAgent
+        })
+        .eq('id', row.id);
+
+      if (updateError) throw updateError;
+      markErrorReportedNow(errorHash, user?.name);
+      alert(`이미 접수된 오류입니다.\n\n최초 접수: ${formatKST(row.created_at)}\n현재 상태: ${row.status || '접수'}\n발생횟수: ${nextCount}회`);
+      return;
+    }
+
+    const payload = {
       reporter_name: user?.name || '',
       reporter_role: user?.role || '',
       reporter_store: user?.store_name || '',
@@ -278,20 +317,77 @@ async function saveErrorReport({ user, currentTab = '', actionName = '', joinNo 
       join_no: joinNo || '',
       error_message: message,
       user_agent: navigator.userAgent,
-      status: '접수'
-    });
+      status: '접수',
+      error_hash: errorHash,
+      occurrence_count: 1,
+      first_occurred_at: new Date().toISOString(),
+      last_occurred_at: new Date().toISOString(),
+      last_reporter_name: user?.name || '',
+      last_reporter_store: user?.store_name || '',
+      last_user_agent: navigator.userAgent
+    };
+
+    const { error: insertError } = await supabase.from('error_reports').insert(payload);
+    if (insertError) {
+      // SQL 미반영 상태 호환: 기존 컬럼만으로 저장
+      const fallback = {
+        reporter_name: payload.reporter_name,
+        reporter_role: payload.reporter_role,
+        reporter_store: payload.reporter_store,
+        current_tab: payload.current_tab,
+        action_name: payload.action_name,
+        join_no: payload.join_no,
+        error_message: payload.error_message,
+        user_agent: payload.user_agent,
+        status: payload.status
+      };
+      const { error: fallbackError } = await supabase.from('error_reports').insert(fallback);
+      if (fallbackError) throw fallbackError;
+    }
+
+    markErrorReportedNow(errorHash, user?.name);
     alert('오류 보고가 접수되었습니다.');
   } catch (e) {
     alert('오류 보고 저장 실패: ' + e.message);
   }
 }
 
+function normalizeErrorText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+}
+function createErrorFingerprint({ currentTab, actionName, joinNo, error }) {
+  return [
+    normalizeErrorText(currentTab),
+    normalizeErrorText(actionName),
+    normalizeErrorText(joinNo),
+    normalizeErrorText(error?.message || error || '')
+  ].join('|').toLowerCase();
+}
+function getErrorThrottleKey(hash, userName) {
+  return `error_report_throttle_${userName || 'unknown'}_${hash}`;
+}
+function wasErrorReportedWithinOneMinute(hash, userName) {
+  try {
+    const key = getErrorThrottleKey(hash, userName);
+    const last = Number(localStorage.getItem(key) || 0);
+    return last && (Date.now() - last < 60 * 1000);
+  } catch { return false; }
+}
+function markErrorReportedNow(hash, userName) {
+  try { localStorage.setItem(getErrorThrottleKey(hash, userName), String(Date.now())); } catch {}
+}
 function askErrorReport({ user, currentTab = '', actionName = '', joinNo = '', error }) {
   const message = error?.message || String(error || '알 수 없는 오류');
+  const errorHash = createErrorFingerprint({ currentTab, actionName, joinNo, error });
+
+  if (wasErrorReportedWithinOneMinute(errorHash, user?.name)) {
+    alert('이미 접수된 오류입니다.\n\n동일 오류는 1분 이내 다시 접수되지 않습니다.');
+    return;
+  }
+
   const ok = confirm(`오류가 발생했습니다.\n\n${message}\n\n이 오류를 관리자에게 보고할까요?`);
   if (ok) saveErrorReport({ user, currentTab, actionName, joinNo, error });
 }
-
 
 function UpdateNotice({ user }) {
   const [hasUpdate, setHasUpdate] = useState(false);
@@ -2203,7 +2299,7 @@ function ErrorReportsViewer({ user }) {
           <tbody>
             {filtered.map(r => (
               <tr key={r.id}>
-                <td>{formatKST(r.created_at)}</td>
+                <td>{formatKST(r.created_at)}</td><td>{r.occurrence_count || 1}</td>
                 <td>{r.reporter_name}</td>
                 <td>{r.reporter_role}</td>
                 <td>{r.reporter_store}</td>
@@ -2779,7 +2875,7 @@ function ReviewDashboard({ user }) {
                 <td>{formatCustomerJoinNo(target.join_no, customersByJoinNo, target.customer_name)} {hasMinorInfo(log) && <span className="minorBadge">미성년자</span>}</td>
                 <td>{target.assigned_employee}</td>
                 <td>{target.assigned_store}</td>
-                <td>{log.call_result} / {log.call_detail} {hasMinorInfo(log) && <span className="minorBadge">미성년자</span>}</td>
+                <td>{log.call_result} / {log.call_detail}</td>
                 <td>{log.memo ? '있음' : '-'}</td>
                 <td>{log.review_status || '검수대기'}</td>
                 <td>{formatKST(log.checked_at)}</td>
@@ -2889,7 +2985,7 @@ function ReviewModal({ item, user, onClose, onSaved }) {
 
         <section>
           <h3>직원 입력 결과</h3>
-          <p><b>{log.call_result}</b> / {log.call_detail} {hasMinorInfo(log) && <span className="minorBadge">미성년자</span>}</p>
+          <p><b>{log.call_result}</b> / {log.call_detail}</p>
           <p className="reason">{log.memo || '메모 없음'}</p>
           {hasMinorInfo(log) && (
             <div className="minorReviewInfoBox">
