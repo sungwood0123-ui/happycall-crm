@@ -2267,3 +2267,25 @@ input.requiredInput::placeholder{
     margin-top:18px !important;
   }
 }
+
+/* V25 odd/even monthly + admin delete */
+.dangerBtn{
+  background:#dc2626 !important;
+  color:#fff !important;
+  border:1px solid #b91c1c !important;
+  border-radius:12px !important;
+  min-height:44px !important;
+  padding:0 14px !important;
+  font-weight:900 !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  margin-left:8px !important;
+}
+@media (max-width:768px){
+  .dangerBtn{
+    width:100% !important;
+    margin-left:0 !important;
+    margin-top:8px !important;
+  }
+}

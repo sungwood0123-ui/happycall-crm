@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v24-20260615084217';
+const APP_BUILD_VERSION = 'v25-20260616011517';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -3448,6 +3448,14 @@ function dedupeHappycallTargets(rows) {
   };
 }
 
+
+function isSameOddEvenMonth(openDate, targetDate) {
+  const openMonth = Number(String(openDate || '').slice(5, 7));
+  const targetMonth = Number(String(targetDate || '').slice(5, 7));
+  if (!openMonth || !targetMonth) return true;
+  return openMonth % 2 === targetMonth % 2;
+}
+
 function TargetGenerator({ user }) {
   const todayISO = new Date().toISOString().slice(0, 10);
   const [targetDate, setTargetDate] = useState(todayISO);
@@ -3596,6 +3604,7 @@ function TargetGenerator({ user }) {
         if (!c.open_date || !c.join_no) return;
         if (shouldSkipByRefusedCustomer(c, refusedMap, 'MONTHLY_DAY')) return;
         if (dayOfMonth(c.open_date) !== targetDay) return;
+        if (!isSameOddEvenMonth(c.open_date, targetDate)) return;
         if (dPlusJoinNosThisMonth.has(c.join_no)) return;
 
         const a = decideAssignment(c, activeEmployees, stores || [], historyMap, staffByStore, counter);
@@ -3716,14 +3725,83 @@ function TargetGenerator({ user }) {
     }
   }
 
+
+  async function deleteGeneratedTargetsForDate() {
+    if (user.role !== '관리자') {
+      alert('관리자만 삭제할 수 있습니다.');
+      return;
+    }
+
+    const { data: existingRows, error: countError } = await supabase
+      .from('happycall_targets')
+      .select('id, join_no, target_date, call_type')
+      .eq('target_date', targetDate);
+
+    if (countError) {
+      alert('삭제 대상 조회 오류: ' + countError.message);
+      return;
+    }
+
+    const count = existingRows?.length || 0;
+    if (!count) {
+      alert(`${targetDate}에 삭제할 해피콜 대상이 없습니다.`);
+      return;
+    }
+
+    const confirmText = `${targetDate} 해피콜 대상 ${count}건을 삭제합니다.\n검수/처리 로그가 연결된 대상은 삭제하면 안 될 수 있습니다.\n정말 삭제하려면 아래 입력창에 삭제 라고 입력해주세요.`;
+    const input = prompt(confirmText);
+    if (input !== '삭제') {
+      alert('삭제가 취소되었습니다.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const targetIds = (existingRows || []).map(r => r.id);
+
+      const { data: logs, error: logError } = await supabase
+        .from('happycall_logs')
+        .select('target_id')
+        .in('target_id', targetIds);
+
+      if (logError) throw logError;
+
+      const loggedIds = new Set((logs || []).map(l => l.target_id));
+      const deletableIds = targetIds.filter(id => !loggedIds.has(id));
+
+      if (!deletableIds.length) {
+        alert('이미 처리/검수 로그가 연결된 대상만 있어 삭제할 수 없습니다.');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('happycall_targets')
+        .delete()
+        .in('id', deletableIds);
+
+      if (error) throw error;
+
+      await writeAuditLog('해피콜대상삭제', 'happycall_targets', targetDate, user, `${targetDate} 삭제 ${deletableIds.length}건 / 로그연결 제외 ${count - deletableIds.length}건`);
+      alert(`삭제 완료: ${deletableIds.length}건\n로그 연결 제외: ${count - deletableIds.length}건`);
+      setSummary(null);
+      setPreview([]);
+    } catch (e) {
+      alert('해피콜 대상 삭제 오류: ' + e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div>
       <h2>해피콜 생성</h2>
       <LastAuditNotice action="해피콜대상저장" label="마지막 해피콜 대상 저장" />
+      {user.role === '관리자' && <button className="dangerBtn" onClick={deleteGeneratedTargetsForDate} disabled={busy}>당일 생성 해피콜 삭제</button>}
       <div className="uploadBox">
         <p className="muted">대상일 기준으로 D+1, D+7, D+13, D+95, D+185와 월간 정기 해피콜을 생성합니다.</p>
         <p className="muted">D+95/D+185는 판매자 재직 시 본인 배정, 판매자 퇴사 시 근무이력 기준 당시 점장 또는 현재 매장 점장에게 배정됩니다.</p>
         <p className="muted">당월 D+ 해피콜이 있는 고객은 해당 월의 월간 정기 해피콜에서 제외됩니다.</p>
+        <p className="muted">월 정기 해피콜은 홀수달 개통 고객은 홀수달, 짝수달 개통 고객은 짝수달에만 생성됩니다.</p>
         <p className="muted">일요일 자동 생성은 서버 스케줄러가 KST 오전 9시에 실행하며, 토요일 개통 D+1은 월요일 생성 시 자동 보정됩니다.</p>
         <p className="muted">통화 불가 고객은 이후 해피콜 생성 대상에서 제외됩니다.</p>
 
