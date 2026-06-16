@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v27.2-20260616085608';
+const APP_BUILD_VERSION = 'v27.3-20260616093630';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -388,8 +388,7 @@ function validateFreepassRequest({ requestType, useType, requestDate, hours, use
   }
   
   if (![1,2,3].includes(h)) return '프리패스는 1시간 단위로 하루 최대 3시간까지만 신청 가능합니다.';
-  if (requestType === '사용' && useType !== '월차 사용' && currentUsed + h > 10) return '프리패스는 월 최대 10시간까지만 사용 가능합니다. 월차 전환과 월차 사용은 제외됩니다.';
-  if (requestType === '사용' && useType === '월차 사용') return '';
+  if (requestType === '사용' && currentUsed + h > 10) return '프리패스는 월 최대 10시간까지만 사용 가능합니다. 월차 전환은 제외됩니다.';
   if (!requestDate) return '사용일을 선택해주세요.';
   if (requestType !== '사용') return '';
   if (useType === '오전 늦게 출근') {
@@ -622,7 +621,7 @@ function FreepassMyPage({ user }) {
         <Card title="잔여 프리패스" value={`${balance}시간`} />
         <Card title="이번달 사용" value={`${monthUsed}시간`} />
         <Card title="월 사용 한도" value="10시간" />
-        <Card title="월차 전환" value="10시간 = 월차 1개" />
+        <Card title="월차 전환" value="10시간" subValue="월차 1개" />
       </div>
       <div className="sectionCard">
         <h3>내 프리패스 이력</h3>
@@ -684,9 +683,9 @@ function FreepassRequestForm({ user }) {
     <h3>프리패스 신청</h3>
     <div className="formGrid">
       <label>신청 유형<select value={requestType} onChange={e=>setRequestType(e.target.value)}><option>사용</option><option>야근 적립</option><option>휴무출근 적립</option><option>월차 전환</option></select></label>
-      {requestType==='사용' && <label>사용 구분<select value={useType} onChange={e=>setUseType(e.target.value)}><option>오전 늦게 출근</option><option>오후 일찍 퇴근</option><option>월차 사용</option></select></label>}
+      {requestType==='사용' && <label>사용 구분<select value={useType} onChange={e=>setUseType(e.target.value)}><option>오전 늦게 출근</option><option>오후 일찍 퇴근</option></select></label>}
       <label>사용/적립일<input type="date" value={requestDate} onChange={e=>setRequestDate(e.target.value)} /></label>
-      <label>시간<select value={hours} onChange={e=>setHours(Number(e.target.value))}>{(requestType==='월차 전환'||useType==='월차 사용')?<option value={10}>1일</option>:<><option value={1}>1시간</option><option value={2}>2시간</option><option value={3}>3시간</option></>}</select></label>
+      <label>시간<select value={hours} onChange={e=>setHours(Number(e.target.value))}>{requestType==='월차 전환'?<option value={10}>10시간</option>:<><option value={1}>1시간</option><option value={2}>2시간</option><option value={3}>3시간</option></>}</select></label>
       {requestType==='사용' && useType==='오후 일찍 퇴근' && <label>사용 시작 시간<input type="time" value={useStartTime} onChange={e=>setUseStartTime(e.target.value)} /></label>}
     </div>
     {(requestType==='야근 적립'||requestType==='휴무출근 적립') && <div className="photoCaptureBox"><p className="muted">현장에서 직접 촬영한 타임스탬프 사진만 첨부해주세요. 최대 2장까지 가능하며, 최종 승인 시 사진 데이터는 즉시 삭제됩니다.</p><input type="file" accept="image/*" capture="environment" onChange={e=>onPhoto(e.target.files?.[0])}/>
@@ -710,7 +709,7 @@ function FreepassApprovalQueue({ user, mode }) {
         await writeAuditLog('프리패스점장승인','freepass_requests',row.id,user,`${row.employee_name} ${row.hours}시간`);
       } else {
         if(!isSuperAdmin(user)) return alert('최종 승인은 최고관리자만 가능합니다.');
-        const type=(row.request_type==='야근 적립'||row.request_type==='휴무출근 적립')?'적립':(row.request_type==='월차 전환'?'월차전환':(row.use_type==='월차 사용'?'월차사용':'사용'));
+        const type=(row.request_type==='야근 적립'||row.request_type==='휴무출근 적립')?'적립':(row.request_type==='월차 전환'?'월차전환':'사용');
         const sign=(row.request_type==='야근 적립'||row.request_type==='휴무출근 적립')?1:-1;
         const {error:reqError}=await supabase.from('freepass_requests').update({status:'최종승인완료',final_status:'승인',final_approved_by:user.name,final_approved_at:new Date().toISOString(),evidence_photo_data:null,evidence_deleted_at:new Date().toISOString()}).eq('id',row.id); if(reqError) throw reqError;
         const {error:ledgerError}=await supabase.from('freepass_ledger').insert({employee_id:row.employee_id,employee_name:row.employee_name,employee_store:row.employee_store,type,hours:sign*Number(row.hours),reason:row.reason,source_request_id:row.id,effective_date:row.request_date,created_by:user.name}); if(ledgerError) throw ledgerError;
@@ -746,11 +745,7 @@ function FreepassStoreOverview({ user }) {
     setEmployees(visibleEmployees);
   }
 
-  const rows = [...employees].sort((a,b)=>{
-    if (a.role === '점장' && b.role !== '점장') return -1;
-    if (a.role !== '점장' && b.role === '점장') return 1;
-    return String(a.name||'').localeCompare(String(b.name||''),'ko');
-  });
+  const rows = sortEmployeesForLogin(employees);
 
   const selectedRows = selected ? ledger.filter(r => r.employee_name === selected.name) : [];
 
@@ -885,8 +880,6 @@ function FreepassSemiannualReset({ user }) {
 
 function FreepassOverview({ user }) {
   const [ledger,setLedger]=useState([]),[employees,setEmployees]=useState([]);
-  const storeOrder = ['금촌','야당','봉일천','화정','능곡','관리직'];
-
   useEffect(()=>{ load(); },[]);
   async function load(){
     const {data:l}=await supabase.from('freepass_ledger').select('*').order('created_at',{ascending:false});
@@ -895,14 +888,7 @@ function FreepassOverview({ user }) {
     setEmployees(e||[]);
   }
 
-  const rows = [...employees].sort((a,b)=>{
-    const ai = storeOrder.indexOf(a.store_name) >= 0 ? storeOrder.indexOf(a.store_name) : 999;
-    const bi = storeOrder.indexOf(b.store_name) >= 0 ? storeOrder.indexOf(b.store_name) : 999;
-    if (ai !== bi) return ai - bi;
-    if (a.role === '점장' && b.role !== '점장') return -1;
-    if (a.role !== '점장' && b.role === '점장') return 1;
-    return String(a.name||'').localeCompare(String(b.name||''),'ko');
-  });
+  const rows = sortEmployeesForLogin(employees);
 
   return (
     <div className="sectionCard">
@@ -1297,8 +1283,8 @@ function Dashboard({ user }) {
   );
 }
 
-function Card({ title, value }) {
-  return <div className="stat"><span>{title}</span><b>{value}</b></div>;
+function Card({title, value, subValue}) {
+  return <div className="stat"><span>{title}</span><b>{value}{subValue && <span className="cardSubValue">{subValue}</span>}</b></div>;
 }
 
 

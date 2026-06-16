@@ -2551,3 +2551,31 @@ header h1{
     font-size:12px;
   }
 }
+
+/* V27.3 monthly leave card text polish */
+.cardSubValue{
+  display:block;
+  margin-top:4px;
+  font-size:13px;
+  line-height:1.2;
+  font-weight:700;
+  color:#64748b;
+  white-space:nowrap;
+}
+.summaryGrid .card strong,
+.summaryGrid .statCard strong,
+.summaryGrid strong{
+  white-space:nowrap;
+  word-break:keep-all;
+}
+@media(max-width:768px){
+  .summaryGrid .card strong,
+  .summaryGrid .statCard strong,
+  .summaryGrid strong{
+    font-size:clamp(26px, 7vw, 36px) !important;
+    line-height:1.05 !important;
+  }
+  .cardSubValue{
+    font-size:12px !important;
+  }
+}
