@@ -2668,3 +2668,98 @@ header h1{
   opacity:.55;
   cursor:not-allowed;
 }
+
+/* V27.7 freepass UI/flow/mobile fix */
+.timeValue.positive{color:#1d4ed8 !important;}
+.timeValue.zero{color:#9a3412 !important;}
+.timeValue.negative{color:#991b1b !important;}
+.balanceCard.positive,.balanceCard.zero,.balanceCard.negative{
+  background:#fff !important;
+  border-color:#e5e7eb !important;
+  color:inherit !important;
+}
+.summaryGrid .card{
+  background:#fff !important;
+  border:1px solid #e5e7eb !important;
+  border-radius:16px !important;
+  padding:20px !important;
+  min-height:116px !important;
+  display:flex !important;
+  flex-direction:column !important;
+  justify-content:center !important;
+  align-items:flex-start !important;
+}
+.summaryGrid .card span{
+  margin-bottom:10px !important;
+}
+.summaryGrid .card strong{
+  font-size:34px !important;
+  line-height:1 !important;
+  white-space:nowrap !important;
+}
+.buttonRow{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.buttonRow .cameraButton,
+.buttonRow button{
+  margin:0 !important;
+}
+.compactFormGrid{
+  align-items:end;
+}
+.accrualCard textarea{
+  min-height:80px;
+}
+.photoCaptureBox .primary:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+}
+@media(max-width:768px){
+  .container,.page,.sectionCard,.modal{
+    max-width:100% !important;
+    box-sizing:border-box !important;
+  }
+  .summaryGrid{
+    grid-template-columns:1fr 1fr !important;
+    gap:10px !important;
+  }
+  .summaryGrid .card{
+    padding:16px !important;
+    min-height:96px !important;
+  }
+  .summaryGrid .card strong{
+    font-size:28px !important;
+  }
+  .formGrid,
+  .compactFormGrid{
+    grid-template-columns:1fr !important;
+    gap:10px !important;
+  }
+  .buttonRow{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:8px !important;
+    width:100%;
+  }
+  .buttonRow .cameraButton,
+  .buttonRow button,
+  .photoCaptureBox .cameraButton,
+  .photoCaptureBox > button{
+    width:100% !important;
+    min-height:44px !important;
+  }
+  .sectionCard{
+    overflow-x:hidden !important;
+  }
+  table{
+    min-width:0 !important;
+  }
+}
+@media(max-width:430px){
+  .summaryGrid{
+    grid-template-columns:1fr !important;
+  }
+}
