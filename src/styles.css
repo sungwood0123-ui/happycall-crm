@@ -2600,3 +2600,45 @@ header h1{
 .requestStatusBadge.rejected{background:#fee2e2;color:#991b1b;}
 .smallText{font-size:12px;}
 @media(max-width:768px){.requestStatusBadge{min-width:auto;font-size:11px;}}
+
+/* V27.5 accrual tab + status/right + limit setting */
+.balanceCard.positive{
+  background:#dbeafe !important;
+  border-color:#93c5fd !important;
+  color:#1d4ed8 !important;
+}
+.balanceCard.zero{
+  background:#ffedd5 !important;
+  border-color:#fdba74 !important;
+  color:#9a3412 !important;
+}
+.balanceCard.negative{
+  background:#fee2e2 !important;
+  border-color:#fca5a5 !important;
+  color:#991b1b !important;
+}
+.cameraButton{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:42px;
+  padding:0 16px;
+  border-radius:12px;
+  background:#111827;
+  color:#fff;
+  font-weight:900;
+  cursor:pointer;
+  width:fit-content;
+}
+.cameraButton input{display:none;}
+.photoCaptureBox .cameraButton{margin-bottom:10px;}
+
+/* V27.5 request guard/cancel/edit */
+.innerEditBox{
+  margin-top:10px;
+}
+.balanceCard.zero strong,
+.balanceCard.positive strong,
+.balanceCard.negative strong{
+  white-space:nowrap;
+}

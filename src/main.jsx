@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v27.4-20260617040725';
+const APP_BUILD_VERSION = 'v27.5-20260617072632';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -365,12 +365,12 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map(char => char.charCodeAt(0)));
 }
 function pushStatusLabel(status) {
-  const map = {'점장승인대기':'점장 승인 대기','최종승인대기':'점장 승인 완료 / 최종 승인 대기','최종승인완료':'최종 승인 완료','점장반려':'점장 반려','최종반려':'최종 반려'};
+  const map = {'점장승인대기':'점장 승인 대기','최종승인대기':'점장 승인 완료 / 최종 승인 대기','최종승인완료':'최종 승인 완료','점장반려':'점장 반려','최종반려':'최종 반려','신청취소':'본인 취소'};
   return map[status] || status || '대기';
 }
 function pushStatusClass(status) {
   if (status === '최종승인완료') return 'approved';
-  if (status === '점장반려' || status === '최종반려') return 'rejected';
+  if (status === '점장반려' || status === '최종반려' || status === '신청취소') return 'rejected';
   if (status === '최종승인대기') return 'finalWaiting';
   return 'waiting';
 }
@@ -384,6 +384,76 @@ function isAdminLike(user) {
 function isManagerLike(user) {
   return isAdminLike(user) || user?.role === '점장';
 }
+
+
+function isPendingFreepassRequest(status) {
+  return ['점장승인대기','최종승인대기','임시저장'].includes(status);
+}
+
+function isEditableFreepassRequest(row) {
+  if (!row) return false;
+  if (!isPendingFreepassRequest(row.status)) return false;
+  return ['사용','월차 전환'].includes(row.request_type);
+}
+
+function isCancelableFreepassRequest(row) {
+  if (!row) return false;
+  return isPendingFreepassRequest(row.status);
+}
+
+function pendingDebitHours(rows, employeeName, excludeId = null) {
+  return (rows || [])
+    .filter(r => r.employee_name === employeeName)
+    .filter(r => r.id !== excludeId)
+    .filter(r => isPendingFreepassRequest(r.status))
+    .filter(r => r.request_type === '사용' || r.request_type === '월차 전환')
+    .reduce((sum, r) => sum + Math.abs(Number(r.hours || 0)), 0);
+}
+
+function getBalanceTone(balance) {
+  const n = Number(balance || 0);
+  if (n < 0) return 'negative';
+  if (n === 0) return 'zero';
+  return 'positive';
+}
+
+async function getFreepassMonthlyLimit() {
+  try {
+    const { data, error } = await supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'freepass_monthly_limit')
+      .maybeSingle();
+    if (error) throw error;
+    const n = Number(data?.value || 10);
+    return Number.isFinite(n) && n > 0 ? n : 10;
+  } catch {
+    return 10;
+  }
+}
+
+function parseEvidencePhotos(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === 'object') return [parsed];
+  } catch {}
+  return [{ data: value }];
+}
+
+function buildEvidencePhotos({ startPhoto, endPhoto, photos }) {
+  if (photos && Array.isArray(photos)) return JSON.stringify(photos);
+  const arr = [];
+  if (startPhoto) arr.push({ type: '출근', ...(typeof startPhoto === 'string' ? { data: startPhoto } : startPhoto) });
+  if (endPhoto) arr.push({ type: '퇴근', ...(typeof endPhoto === 'string' ? { data: endPhoto } : endPhoto) });
+  return JSON.stringify(arr);
+}
+
+function isAccrualRequest(type) {
+  return type === '야근 적립' || type === '휴무출근 적립';
+}
+
 function freepassBalanceOf(rows, name) {
   return (rows || []).filter(r => r.employee_name === name).reduce((s,r)=>s+Number(r.hours || 0),0);
 }
@@ -401,7 +471,7 @@ function freepassPhotoTimeLabel(iso) {
   }
 }
 
-function validateFreepassRequest({ requestType, useType, requestDate, hours, useStartTime, currentUsed = 0 }) {
+function validateFreepassRequest({ requestType, useType, requestDate, hours, useStartTime, currentUsed = 0, monthlyLimit = 10 }) {
   const h = Number(hours || 0);
   if (requestType === '월차 전환') {
     if (h !== 10) return '월차 전환은 10시간만 가능합니다.';
@@ -409,7 +479,7 @@ function validateFreepassRequest({ requestType, useType, requestDate, hours, use
   }
   
   if (![1,2,3].includes(h)) return '프리패스는 1시간 단위로 하루 최대 3시간까지만 신청 가능합니다.';
-  if (requestType === '사용' && currentUsed + h > 10) return '프리패스는 월 최대 10시간까지만 사용 가능합니다. 월차 전환은 제외됩니다.';
+  if (requestType === '사용' && currentUsed + h > Number(monthlyLimit || 10)) return `프리패스는 월 최대 ${monthlyLimit}시간까지만 사용 가능합니다. 월차 전환은 제외됩니다.`;
   if (!requestDate) return '사용일을 선택해주세요.';
   if (requestType !== '사용') return '';
   if (useType === '오전 늦게 출근') {
@@ -609,9 +679,9 @@ function AutoLogoutGuard({ onLogout }) {
 
 function FreepassModule({ user }) {
   const [tab, setTab] = useState('내 프리패스');
-  const tabs = ['내 프리패스', '사용 신청'];
+  const tabs = ['내 프리패스', '사용 신청', '적립 요청'];
   if (user.role === '점장' || isAdminLike(user)) tabs.push('점장 승인', '전체 현황');
-  if (isSuperAdmin(user)) tabs.push('최종 승인', '관리자 조정', '반기 초기화');
+  if (isSuperAdmin(user)) tabs.push('최종 승인', '관리자 조정', '월 한도 설정', '반기 초기화');
   
   return (
     <div>
@@ -619,10 +689,12 @@ function FreepassModule({ user }) {
       <div className="filterBar moduleTabs">{tabs.map(t => <button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}</button>)}</div>
       {tab==='내 프리패스' && <FreepassMyPage user={user} />}
       {tab==='사용 신청' && <FreepassRequestForm user={user} />}
+      {tab==='적립 요청' && <AccrualRequestTab user={user} />}
       {tab==='점장 승인' && <FreepassApprovalQueue user={user} mode="manager" />}
       {tab==='전체 현황' && <FreepassStoreOverview user={user} />}
       {tab==='최종 승인' && <FreepassApprovalQueue user={user} mode="final" />}
       {tab==='관리자 조정' && <FreepassAdminAdjust user={user} />}
+      {tab==='월 한도 설정' && <FreepassLimitSettings user={user} />}
       {tab==='반기 초기화' && <FreepassSemiannualReset user={user} />}
     </div>
   );
@@ -632,6 +704,9 @@ function FreepassMyPage({ user }) {
   const [ledger,setLedger]=useState([]);
   const [requests,setRequests]=useState([]);
   const [selected,setSelected]=useState(null);
+  const [editMode,setEditMode]=useState(false);
+  const [editDraft,setEditDraft]=useState({});
+  const [monthlyLimit,setMonthlyLimit]=useState(10);
 
   useEffect(()=>{ load(); },[]);
 
@@ -640,33 +715,100 @@ function FreepassMyPage({ user }) {
     const {data:r}=await supabase.from('freepass_requests').select('*').eq('employee_name',user.name).order('requested_at',{ascending:false});
     setLedger(l||[]);
     setRequests(r||[]);
+    setMonthlyLimit(await getFreepassMonthlyLimit());
   }
 
   const myRows=ledger.filter(r=>r.employee_name===user.name);
   const balance=freepassBalanceOf(ledger,user.name);
+  const pending = pendingDebitHours(requests, user.name);
+  const available = balance - pending;
   const monthUsed=freepassUsedInMonth(ledger,user.name);
+  const tone = getBalanceTone(balance);
+
+  function openDetail(row){
+    setSelected(row);
+    setEditMode(false);
+    setEditDraft({
+      request_date: row.request_date || todayLocalISO(),
+      use_type: row.use_type || '오전 늦게 출근',
+      hours: Number(row.hours || 1),
+      reason: row.reason || ''
+    });
+  }
+
+  async function cancelRequest(row){
+    if(!isCancelableFreepassRequest(row)) return alert('승인 완료/반려/취소된 건은 취소할 수 없습니다.');
+    if(!confirm('이 신청을 취소할까요?')) return;
+    try{
+      const {error}=await supabase.from('freepass_requests').update({
+        status:'신청취소',
+        final_status:'취소',
+        reject_reason:'본인 취소',
+        updated_at:new Date().toISOString()
+      }).eq('id', row.id).eq('employee_name', user.name);
+      if(error) throw error;
+      await writeAuditLog('프리패스본인취소','freepass_requests',row.id,user,`${row.request_type} / ${row.hours}시간`);
+      alert('신청이 취소되었습니다.');
+      setSelected(null);
+      load();
+    }catch(e){
+      askErrorReport({user,currentTab:'프리패스',actionName:'본인 신청 취소',error:e});
+    }
+  }
+
+  async function saveEdit(row){
+    if(!isEditableFreepassRequest(row)) return alert('이 신청은 수정할 수 없습니다.');
+    const need = Number(editDraft.hours || 0);
+    if(need <= 0) return alert('시간을 입력해주세요.');
+    const pendingExceptMe = pendingDebitHours(requests, user.name, row.id);
+    const availableExceptMe = balance - pendingExceptMe;
+    if(need > availableExceptMe){
+      return alert(`수정 가능 시간이 부족합니다.\n\n잔여 프리패스: ${balance}시간\n다른 승인대기 사용/전환: ${pendingExceptMe}시간\n수정 가능: ${availableExceptMe}시간\n수정 요청: ${need}시간`);
+    }
+    try{
+      const patch = {
+        request_date: editDraft.request_date,
+        hours: need,
+        reason: editDraft.reason,
+        updated_at: new Date().toISOString()
+      };
+      if(row.request_type === '사용') patch.use_type = editDraft.use_type;
+      const {error}=await supabase.from('freepass_requests').update(patch).eq('id', row.id).eq('employee_name', user.name);
+      if(error) throw error;
+      await writeAuditLog('프리패스본인수정','freepass_requests',row.id,user,`${row.request_type} / ${need}시간`);
+      alert('신청이 수정되었습니다.');
+      setEditMode(false);
+      setSelected(null);
+      load();
+    }catch(e){
+      askErrorReport({user,currentTab:'프리패스',actionName:'본인 신청 수정',error:e});
+    }
+  }
 
   return <div>
     <div className="summaryGrid">
-      <Card title="잔여 프리패스" value={`${balance}시간`} />
-      <Card title="이번달 사용" value={`${monthUsed}시간`} />
-      <Card title="월 사용 한도" value="10시간" />
-      <Card title="월차 전환" value="10시간" />
+      <div className={`card balanceCard ${tone}`}>
+        <span>잔여 프리패스</span>
+        <strong>{balance}시간</strong>
+      </div>
+      <Card title="승인대기 사용" value={`${pending}시간`} />
+      <Card title="신청 가능" value={`${available}시간`} />
+      <Card title="월 사용 한도" value={`${monthlyLimit}시간`} />
     </div>
 
     <div className="sectionCard">
       <h3>내 신청 현황</h3>
-      <p className="muted">내가 신청한 프리패스의 승인 진행 상태를 확인할 수 있습니다.</p>
+      <p className="muted">승인대기 중인 사용/월차전환 시간은 신청 가능 시간에서 먼저 차감됩니다.</p>
       <table>
-        <thead><tr><th>신청일</th><th>유형</th><th>사용/적립일</th><th>시간</th><th>상태</th><th>사유</th></tr></thead>
+        <thead><tr><th>접수 날짜·시각</th><th>유형</th><th>사용 요청 날짜</th><th>시간</th><th>사유</th><th>상태</th></tr></thead>
         <tbody>
-          {requests.map(r=><tr key={r.id} className="clickableRow" onClick={()=>setSelected(r)}>
+          {requests.map(r=><tr key={r.id} className="clickableRow" onClick={()=>openDetail(r)}>
             <td>{formatKST(r.requested_at||r.created_at)}</td>
             <td>{r.request_type} {r.use_type||''}</td>
             <td>{r.request_date}</td>
             <td>{r.hours}시간</td>
-            <td><span className={`requestStatusBadge ${pushStatusClass(r.status)}`}>{pushStatusLabel(r.status)}</span></td>
             <td>{r.reason||'-'}</td>
+            <td><span className={`requestStatusBadge ${pushStatusClass(r.status)}`}>{pushStatusLabel(r.status)}</span></td>
           </tr>)}
           {!requests.length&&<tr><td colSpan="6" className="muted">신청 내역이 없습니다.</td></tr>}
         </tbody>
@@ -684,16 +826,33 @@ function FreepassMyPage({ user }) {
 
     {selected&&<div className="modalBg"><div className="modal">
       <div className="modalHead"><h2>프리패스 신청 상세</h2><button onClick={()=>setSelected(null)}>닫기</button></div>
-      <section className="infoGrid">
+      {!editMode && <section className="infoGrid">
+        <p><b>접수 날짜·시각</b><br />{formatKST(selected.requested_at||selected.created_at)}</p>
         <p><b>신청 유형</b><br />{selected.request_type} {selected.use_type||''}</p>
         <p><b>상태</b><br /><span className={`requestStatusBadge ${pushStatusClass(selected.status)}`}>{pushStatusLabel(selected.status)}</span></p>
-        <p><b>사용/적립일</b><br />{selected.request_date}</p>
+        <p><b>사용 요청 날짜</b><br />{selected.request_date}</p>
         <p><b>시간</b><br />{selected.hours}시간</p>
         <p><b>점장 승인</b><br />{selected.manager_status||'대기'} {selected.manager_approved_by?`· ${selected.manager_approved_by}`:''}</p>
         <p><b>최종 승인</b><br />{selected.final_status||'대기'} {selected.final_approved_by?`· ${selected.final_approved_by}`:''}</p>
-        <p><b>반려 사유</b><br />{selected.reject_reason||'-'}</p>
+        <p><b>반려/취소 사유</b><br />{selected.reject_reason||'-'}</p>
         <p><b>신청 사유</b><br />{selected.reason||'-'}</p>
-      </section>
+      </section>}
+
+      {editMode && <section className="sectionCard innerEditBox">
+        <h3>신청 수정</h3>
+        <div className="formGrid">
+          <label>사용 요청 날짜<input type="date" value={editDraft.request_date} onChange={e=>setEditDraft(p=>({...p,request_date:e.target.value}))} /></label>
+          {selected.request_type === '사용' && <label>사용 구분<select value={editDraft.use_type} onChange={e=>setEditDraft(p=>({...p,use_type:e.target.value}))}><option>오전 늦게 출근</option><option>오후 일찍 퇴근</option></select></label>}
+          <label>시간<select value={editDraft.hours} onChange={e=>setEditDraft(p=>({...p,hours:Number(e.target.value)}))}>{selected.request_type==='월차 전환'?<option value={10}>10시간</option>:<><option value={1}>1시간</option><option value={2}>2시간</option><option value={3}>3시간</option></>}</select></label>
+        </div>
+        <textarea value={editDraft.reason} onChange={e=>setEditDraft(p=>({...p,reason:e.target.value}))} placeholder="사유 입력" />
+        <div className="reviewActions"><button className="primary" onClick={()=>saveEdit(selected)}>수정 저장</button><button onClick={()=>setEditMode(false)}>수정 취소</button></div>
+      </section>}
+
+      <div className="reviewActions">
+        {isEditableFreepassRequest(selected) && !editMode && <button className="primary" onClick={()=>setEditMode(true)}>수정</button>}
+        {isCancelableFreepassRequest(selected) && <button className="dangerBtn" onClick={()=>cancelRequest(selected)}>신청 취소</button>}
+      </div>
     </div></div>}
   </div>;
 }
@@ -708,8 +867,10 @@ function FreepassRequestForm({ user }) {
   const [reason,setReason]=useState('');
   const [photoItems,setPhotoItems]=useState([]);
   const [ledger,setLedger]=useState([]);
+  const [requests,setRequests]=useState([]);
   const [busy,setBusy]=useState(false);
-  useEffect(()=>{ supabase.from('freepass_ledger').select('*').then(({data})=>setLedger(data||[])); },[]);
+  const [monthlyLimit,setMonthlyLimit]=useState(10);
+  useEffect(()=>{ supabase.from('freepass_ledger').select('*').then(({data})=>setLedger(data||[])); supabase.from('freepass_requests').select('*').eq('employee_name', user.name).then(({data})=>setRequests(data||[])); getFreepassMonthlyLimit().then(setMonthlyLimit); },[]);
   async function onPhoto(file){
     if(!file) return;
     if(photoItems.length >= 2) return alert('사진은 최대 2장까지 첨부 가능합니다.');
@@ -724,8 +885,17 @@ function FreepassRequestForm({ user }) {
   async function submit(){
     if(!reason.trim()) return alert('사유를 입력해주세요.');
     const currentUsed=freepassUsedInMonth(ledger,user.name,String(requestDate).slice(0,7));
-    const validation=validateFreepassRequest({requestType,useType,requestDate,hours,useStartTime,currentUsed});
+    const validation=validateFreepassRequest({requestType,useType,requestDate,hours,useStartTime,currentUsed,monthlyLimit});
     if(validation) return alert(validation);
+    if(requestType==='사용' || requestType==='월차 전환'){
+      const balance = freepassBalanceOf(ledger, user.name);
+      const pending = pendingDebitHours(requests, user.name);
+      const available = balance - pending;
+      const need = Math.abs(Number(hours || 0));
+      if(need > available){
+        return alert(`신청 가능 시간이 부족합니다.\n\n잔여 프리패스: ${balance}시간\n승인대기 사용/전환: ${pending}시간\n신청 가능: ${available}시간\n신청 요청: ${need}시간`);
+      }
+    }
     if((requestType==='야근 적립'||requestType==='휴무출근 적립') && !photoItems.length) return alert('적립 신청은 타임스탬프 사진 직접 촬영이 필요합니다.');
     setBusy(true);
     try{
@@ -746,7 +916,7 @@ function FreepassRequestForm({ user }) {
   return <div className="sectionCard">
     <h3>프리패스 신청</h3>
     <div className="formGrid">
-      <label>신청 유형<select value={requestType} onChange={e=>setRequestType(e.target.value)}><option>사용</option><option>야근 적립</option><option>휴무출근 적립</option><option>월차 전환</option></select></label>
+      <label>신청 유형<select value={requestType} onChange={e=>setRequestType(e.target.value)}><option>사용</option><option>월차 전환</option></select></label>
       {requestType==='사용' && <label>사용 구분<select value={useType} onChange={e=>setUseType(e.target.value)}><option>오전 늦게 출근</option><option>오후 일찍 퇴근</option></select></label>}
       <label>사용/적립일<input type="date" value={requestDate} onChange={e=>setRequestDate(e.target.value)} /></label>
       <label>시간<select value={hours} onChange={e=>setHours(Number(e.target.value))}>{requestType==='월차 전환'?<option value={10}>10시간</option>:<><option value={1}>1시간</option><option value={2}>2시간</option><option value={3}>3시간</option></>}</select></label>
@@ -760,6 +930,178 @@ function FreepassRequestForm({ user }) {
     <textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="사유 입력" />
     <button className="primary" onClick={submit} disabled={busy}>신청 등록</button>
   </div>;
+}
+
+
+function AccrualRequestTab({ user }) {
+  const [mode,setMode]=useState('야근 적립');
+  const [rows,setRows]=useState([]);
+  const [requestDate,setRequestDate]=useState(todayLocalISO());
+  const [hours,setHours]=useState(1);
+  const [reason,setReason]=useState('');
+  const [photoItems,setPhotoItems]=useState([]);
+  const [startPhoto,setStartPhoto]=useState(null);
+  const [endPhoto,setEndPhoto]=useState(null);
+  const [selected,setSelected]=useState(null);
+  const [busy,setBusy]=useState(false);
+
+  useEffect(()=>{ load(); },[]);
+
+  async function load(){
+    const {data}=await supabase
+      .from('freepass_requests')
+      .select('*')
+      .eq('employee_name', user.name)
+      .in('request_type', ['야근 적립','휴무출근 적립'])
+      .order('requested_at', { ascending:false });
+    setRows(data||[]);
+  }
+
+  async function capturePhoto(file, setter, label){
+    if(!file) return;
+    const capturedAt = new Date().toISOString();
+    const reader = new FileReader();
+    reader.onload = () => setter({ type: label, data: String(reader.result||''), captured_at: capturedAt });
+    reader.readAsDataURL(file);
+  }
+
+  async function addNightPhoto(file){
+    if(!file) return;
+    if(photoItems.length >= 2) return alert('사진은 최대 2장까지 첨부 가능합니다.');
+    const capturedAt = new Date().toISOString();
+    const reader = new FileReader();
+    reader.onload = () => setPhotoItems(prev => [...prev, { type:`야근${prev.length+1}`, data:String(reader.result||''), captured_at:capturedAt }].slice(0,2));
+    reader.readAsDataURL(file);
+  }
+
+  async function submitNight(){
+    if(!photoItems.length) return alert('야근 적립은 사진 촬영이 필요합니다.');
+    if(!reason.trim()) return alert('사유를 입력해주세요.');
+    setBusy(true);
+    try{
+      const {error}=await supabase.from('freepass_requests').insert({
+        employee_id:user.id, employee_name:user.name, employee_store:user.store_name,
+        request_type:'야근 적립', use_type:null, request_date:requestDate, hours:Number(hours), reason,
+        evidence_photo_data:JSON.stringify(photoItems),
+        status:'최종승인대기', manager_status:'점장승인생략', final_status:'대기',
+        requested_at:new Date().toISOString(), manager_approved_by:user.name, manager_approved_at:new Date().toISOString()
+      });
+      if(error) throw error;
+      await writeAuditLog('야근적립신청','freepass_requests',user.name,user,`${requestDate} / ${hours}시간 / ${reason}`);
+      alert('야근 적립 신청이 접수되었습니다.');
+      setReason(''); setPhotoItems([]); load();
+    }catch(e){ askErrorReport({user,currentTab:'프리패스 적립 요청',actionName:'야근 적립 신청',error:e}); }
+    finally{ setBusy(false); }
+  }
+
+  async function saveStartDraft(){
+    if(!startPhoto) return alert('출근 사진을 촬영해주세요.');
+    if(!reason.trim()) return alert('사유를 입력해주세요.');
+    setBusy(true);
+    try{
+      const {error}=await supabase.from('freepass_requests').insert({
+        employee_id:user.id, employee_name:user.name, employee_store:user.store_name,
+        request_type:'휴무출근 적립', use_type:null, request_date:requestDate, hours:Number(hours), reason,
+        evidence_photo_data:buildEvidencePhotos({startPhoto}),
+        status:'임시저장', manager_status:'점장승인생략', final_status:'대기',
+        requested_at:new Date().toISOString(), manager_approved_by:user.name, manager_approved_at:new Date().toISOString()
+      });
+      if(error) throw error;
+      await writeAuditLog('휴무출근출근사진임시저장','freepass_requests',user.name,user,`${requestDate} / ${hours}시간 / ${reason}`);
+      alert('출근 사진이 임시저장되었습니다. 퇴근 시 신청현황에서 해당 건을 눌러 퇴근 사진을 추가해주세요.');
+      setStartPhoto(null); setReason(''); load();
+    }catch(e){ askErrorReport({user,currentTab:'프리패스 적립 요청',actionName:'출근 사진 임시저장',error:e}); }
+    finally{ setBusy(false); }
+  }
+
+  async function submitHolidayFinal(row){
+    if(!endPhoto) return alert('퇴근 사진을 촬영해주세요.');
+    setBusy(true);
+    try{
+      const existing = parseEvidencePhotos(row.evidence_photo_data);
+      const photos = [...existing.filter(p => p.type !== '퇴근'), endPhoto];
+      const {error}=await supabase.from('freepass_requests').update({
+        evidence_photo_data:JSON.stringify(photos), status:'최종승인대기', final_status:'대기'
+      }).eq('id', row.id);
+      if(error) throw error;
+      await writeAuditLog('휴무출근최종신청','freepass_requests',row.id,user,`${row.request_date} / ${row.hours}시간`);
+      alert('휴무출근 적립 신청이 최종 접수되었습니다.');
+      setEndPhoto(null); setSelected(null); load();
+    }catch(e){ askErrorReport({user,currentTab:'프리패스 적립 요청',actionName:'퇴근 사진 최종저장',error:e}); }
+    finally{ setBusy(false); }
+  }
+
+  return (
+    <div>
+      <div className="sectionCard">
+        <h3>적립 요청</h3>
+        <div className="filterBar moduleTabs">
+          <button className={mode==='야근 적립'?'active':''} onClick={()=>setMode('야근 적립')}>야근 적립</button>
+          <button className={mode==='휴무출근 적립'?'active':''} onClick={()=>setMode('휴무출근 적립')}>휴무출근 적립</button>
+        </div>
+
+        <div className="formGrid">
+          <label>사용 요청 날짜<input type="date" value={requestDate} onChange={e=>setRequestDate(e.target.value)} /></label>
+          <label>적립 요청 시간<select value={hours} onChange={e=>setHours(Number(e.target.value))}><option value={1}>1시간</option><option value={2}>2시간</option><option value={3}>3시간</option></select></label>
+        </div>
+        <textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="사유 입력" />
+
+        {mode==='야근 적립' && <div className="photoCaptureBox">
+          <p className="muted">야근 적립은 사진 촬영 후 바로 최고관리자 승인 대기로 올라갑니다.</p>
+          <label className="cameraButton">사진 촬영<input type="file" accept="image/*" capture="environment" onChange={e=>addNightPhoto(e.target.files?.[0])} /></label>
+          <div className="evidenceGrid">
+            {photoItems.map((p,idx)=><div className="evidenceItem" key={idx}><img className="evidencePreview" src={p.data} alt={`야근 증빙 ${idx+1}`} /><p>촬영일시: {freepassPhotoTimeLabel(p.captured_at)}</p><button type="button" onClick={()=>setPhotoItems(prev=>prev.filter((_,i)=>i!==idx))}>삭제/재촬영</button></div>)}
+          </div>
+          <button className="primary" disabled={busy} onClick={submitNight}>야근 적립 신청</button>
+        </div>}
+
+        {mode==='휴무출근 적립' && <div className="photoCaptureBox">
+          <p className="muted">출근 시 출근 사진을 1차 임시저장하고, 퇴근 시 아래 신청현황에서 해당 건을 눌러 퇴근 사진을 추가해주세요.</p>
+          <label className="cameraButton">출근 사진 촬영<input type="file" accept="image/*" capture="environment" onChange={e=>capturePhoto(e.target.files?.[0], setStartPhoto, '출근')} /></label>
+          {startPhoto && <div className="evidenceItem"><img className="evidencePreview" src={startPhoto.data} alt="출근 사진" /><p>촬영일시: {freepassPhotoTimeLabel(startPhoto.captured_at)}</p><button type="button" onClick={()=>setStartPhoto(null)}>삭제/재촬영</button></div>}
+          <button className="primary" disabled={busy} onClick={saveStartDraft}>1차 임시저장</button>
+        </div>}
+      </div>
+
+      <div className="sectionCard">
+        <h3>적립 요청 신청현황</h3>
+        <table>
+          <thead><tr><th>접수 날짜·시각</th><th>유형</th><th>사용 요청 날짜</th><th>시간</th><th>사유</th><th>상태</th></tr></thead>
+          <tbody>
+            {rows.map(r=><tr key={r.id} className="clickableRow" onClick={()=>setSelected(r)}>
+              <td>{formatKST(r.requested_at || r.created_at)}</td>
+              <td>{r.request_type}</td>
+              <td>{r.request_date}</td>
+              <td>{r.hours}시간</td>
+              <td>{r.reason || '-'}</td>
+              <td><span className={`requestStatusBadge ${pushStatusClass(r.status)}`}>{pushStatusLabel(r.status)}</span></td>
+            </tr>)}
+            {!rows.length && <tr><td colSpan="6" className="muted">적립 요청 내역이 없습니다.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      {selected && <div className="modalBg"><div className="modal">
+        <div className="modalHead"><h2>적립 요청 상세</h2><button onClick={()=>{setSelected(null);setEndPhoto(null);}}>닫기</button></div>
+        <section className="infoGrid">
+          <p><b>접수 날짜·시각</b><br />{formatKST(selected.requested_at || selected.created_at)}</p>
+          <p><b>유형</b><br />{selected.request_type}</p>
+          <p><b>사용 요청 날짜</b><br />{selected.request_date}</p>
+          <p><b>적립 요청 시간</b><br />{selected.hours}시간</p>
+          <p><b>상태</b><br /><span className={`requestStatusBadge ${pushStatusClass(selected.status)}`}>{pushStatusLabel(selected.status)}</span></p>
+          <p><b>사유</b><br />{selected.reason || '-'}</p>
+        </section>
+        <div className="evidenceGrid">
+          {parseEvidencePhotos(selected.evidence_photo_data).map((p,idx)=><div className="evidenceItem" key={idx}><b>{p.type || `사진 ${idx+1}`}</b><img className="evidencePreview" src={p.data || p} alt={p.type || `증빙 ${idx+1}`} />{p.captured_at && <p>촬영일시: {freepassPhotoTimeLabel(p.captured_at)}</p>}</div>)}
+        </div>
+        {selected.request_type==='휴무출근 적립' && selected.status === '임시저장' && <div className="photoCaptureBox">
+          <label className="cameraButton">퇴근 사진 촬영<input type="file" accept="image/*" capture="environment" onChange={e=>capturePhoto(e.target.files?.[0], setEndPhoto, '퇴근')} /></label>
+          {endPhoto && <div className="evidenceItem"><img className="evidencePreview" src={endPhoto.data} alt="퇴근 사진" /><p>촬영일시: {freepassPhotoTimeLabel(endPhoto.captured_at)}</p><button type="button" onClick={()=>setEndPhoto(null)}>삭제/재촬영</button></div>}
+          <button className="primary" disabled={busy} onClick={()=>submitHolidayFinal(selected)}>최종 저장 / 승인 요청</button>
+        </div>}
+      </div></div>}
+    </div>
+  );
 }
 
 function FreepassApprovalQueue({ user, mode }) {
@@ -784,6 +1126,49 @@ function FreepassApprovalQueue({ user, mode }) {
   }
   async function reject(row){ const memo=prompt('반려 사유를 입력해주세요.'); if(!memo) return; try{ const patch=mode==='manager'?{status:'점장반려',manager_status:'반려',manager_rejected_by:user.name,manager_rejected_at:new Date().toISOString(),reject_reason:memo}:{status:'최종반려',final_status:'반려',final_rejected_by:user.name,final_rejected_at:new Date().toISOString(),reject_reason:memo}; const {error}=await supabase.from('freepass_requests').update(patch).eq('id',row.id); if(error) throw error; alert('반려 처리되었습니다.'); setSelected(null); load(); }catch(e){ askErrorReport({user,currentTab:'프리패스 승인',actionName:'반려',error:e}); } }
   return <div className="sectionCard"><h3>{mode==='manager'?'점장 승인 대기':'최종 승인 대기'}</h3><table><thead><tr><th>신청자</th><th>매장</th><th>유형</th><th>일자</th><th>시간</th><th>사유</th><th>상태</th></tr></thead><tbody>{rows.map(r=><tr key={r.id} className="clickableRow" onClick={()=>setSelected(r)}><td>{r.employee_name}</td><td>{r.employee_store}</td><td>{r.request_type} {r.use_type||''}</td><td>{r.request_date}</td><td>{r.hours}시간</td><td>{r.reason}</td><td>{r.status}</td></tr>)}{!rows.length&&<tr><td colSpan="7" className="muted">승인 대기 건이 없습니다.</td></tr>}</tbody></table>{selected&&<div className="modalBg"><div className="modal"><div className="modalHead"><h2>프리패스 승인 상세</h2><button onClick={()=>setSelected(null)}>닫기</button></div><section className="infoGrid"><p><b>신청자</b><br/>{selected.employee_name}</p><p><b>유형</b><br/>{selected.request_type} {selected.use_type||''}</p><p><b>일자</b><br/>{selected.request_date}</p><p><b>시간</b><br/>{selected.hours}시간</p><p><b>사유</b><br/>{selected.reason}</p></section>{selected.evidence_photo_data&&<div className="evidenceGrid large">{(() => { try { const arr = JSON.parse(selected.evidence_photo_data); return Array.isArray(arr) ? arr : [{data:selected.evidence_photo_data}]; } catch { return [{data:selected.evidence_photo_data}]; } })().map((p,idx)=><div className="evidenceItem" key={idx}><img className="evidencePreview large" src={p.data || p} alt={`증빙 ${idx+1}`} />{p.captured_at && <p>촬영일시: {freepassPhotoTimeLabel(p.captured_at)}</p>}</div>)}</div>}<div className="reviewActions"><button className="primary" onClick={()=>approve(selected)}>승인</button><button className="dangerBtn" onClick={()=>reject(selected)}>반려</button></div></div></div>}</div>;
+}
+
+
+function FreepassLimitSettings({ user }) {
+  const [limit,setLimit]=useState(10);
+  const [busy,setBusy]=useState(false);
+
+  useEffect(()=>{ getFreepassMonthlyLimit().then(setLimit); },[]);
+
+  async function save(){
+    if(!isSuperAdmin(user)) return alert('최고관리자만 변경할 수 있습니다.');
+    if(Number(limit) <= 0) return alert('월 사용 한도는 1시간 이상이어야 합니다.');
+    setBusy(true);
+    try{
+      const {error}=await supabase.from('system_settings').upsert({
+        key:'freepass_monthly_limit',
+        value:String(limit),
+        description:'프리패스 월 사용 한도',
+        updated_by:user.name,
+        updated_at:new Date().toISOString()
+      }, { onConflict:'key' });
+      if(error) throw error;
+      await writeAuditLog('프리패스월한도변경','system_settings','freepass_monthly_limit',user,`${limit}시간`);
+      alert('월 프리패스 사용 한도가 변경되었습니다.');
+    }catch(e){
+      askErrorReport({user,currentTab:'프리패스',actionName:'월 사용 한도 변경',error:e});
+    }finally{
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="sectionCard">
+      <h3>월 프리패스 사용 한도 설정</h3>
+      <p className="muted">직원 1인이 한 달에 사용할 수 있는 프리패스 최대 시간을 변경합니다. 월차 전환은 제외됩니다.</p>
+      <div className="formGrid">
+        <label>월 사용 한도
+          <input type="number" min="1" step="1" value={limit} onChange={e=>setLimit(e.target.value)} />
+        </label>
+      </div>
+      <button className="primary" disabled={busy} onClick={save}>한도 저장</button>
+    </div>
+  );
 }
 
 function FreepassAdminAdjust({ user }) {
