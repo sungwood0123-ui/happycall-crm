@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v27.7-20260617080937';
+const APP_BUILD_VERSION = 'v27.8-20260618060650';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -485,27 +485,43 @@ function freepassPhotoTimeLabel(iso) {
 
 function validateFreepassRequest({ requestType, useType, requestDate, hours, useStartTime, currentUsed = 0, monthlyLimit = 10 }) {
   const h = Number(hours || 0);
+
+  if (!requestType) return '신청 유형을 선택해주세요.';
+  if (!requestDate) return requestType === '월차 전환' || requestType === '사용' ? '사용 요청 날짜를 선택해주세요.' : '적립 발생일을 선택해주세요.';
+  if (!h || h <= 0) return '시간을 선택해주세요.';
+
   if (requestType === '월차 전환') {
     if (h !== 10) return '월차 전환은 10시간만 가능합니다.';
     return '';
   }
-  
-  if (![1,2,3].includes(h)) return '프리패스는 1시간 단위로 하루 최대 3시간까지만 신청 가능합니다.';
-  if (requestType === '사용' && currentUsed + h > Number(monthlyLimit || 10)) return `프리패스는 월 최대 ${monthlyLimit}시간까지만 사용 가능합니다. 월차 전환은 제외됩니다.`;
-  if (!requestDate) return '사용일을 선택해주세요.';
-  if (requestType !== '사용') return '';
-  if (useType === '오전 늦게 출근') {
+
+  if (requestType === '사용' && currentUsed + h > Number(monthlyLimit || 10)) {
+    return `프리패스는 월 최대 ${monthlyLimit}시간까지만 사용 가능합니다. 월차 전환은 제외됩니다.`;
+  }
+
+  const now = new Date();
+  const requestDay = new Date(`${requestDate}T00:00:00`);
+
+  if (requestType === '사용' && useType === '오전 늦게 출근') {
     const deadline = new Date(`${requestDate}T01:00:00`);
-    if (new Date() > deadline) return '오전 프리패스는 사용일 오전 1시 전까지 승인 요청이 필요합니다.';
+    if (now > deadline) return '오전 프리패스는 사용일 오전 1시 전까지만 신청 가능합니다.';
   }
-  if (useType === '오후 일찍 퇴근') {
-    if (!useStartTime) return '일찍 퇴근 시작 시간을 입력해주세요.';
-    const deadline = new Date(`${requestDate}T${useStartTime}:00`);
+
+  if (requestType === '사용' && useType === '오후 일찍 퇴근') {
+    const endTime = useStartTime || '20:00';
+    const [hh, mm] = String(endTime).split(':').map(Number);
+    const leaveTime = new Date(requestDay);
+    leaveTime.setHours(hh || 20, mm || 0, 0, 0);
+    leaveTime.setHours(leaveTime.getHours() - h);
+    const deadline = new Date(leaveTime);
     deadline.setHours(deadline.getHours() - 3);
-    if (new Date() > deadline) return '오후 프리패스는 사용 시간 기준 3시간 전까지 승인 요청이 필요합니다.';
+    if (now > deadline) return '오후 프리패스는 실제 사용 시간 기준 3시간 전까지만 신청 가능합니다.';
   }
+
   return '';
 }
+
+
 function normalizeErrorText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 500);
 }
@@ -892,13 +908,14 @@ function FreepassRequestForm({ user }) {
   async function submit(){
     if(!reason.trim()) return alert('사유를 입력해주세요.');
     const currentUsed=freepassUsedInMonth(ledger,user.name,String(requestDate).slice(0,7));
-    const validation=validateFreepassRequest({requestType,useType,requestDate,hours,useStartTime,currentUsed,monthlyLimit});
+    const effectiveHours = requestType === '월차 전환' ? 10 : Number(hours);
+    const validation=validateFreepassRequest({requestType,useType,requestDate,hours:effectiveHours,useStartTime,currentUsed,monthlyLimit});
     if(validation) return alert(validation);
     if(requestType==='사용' || requestType==='월차 전환'){
       const balance = freepassBalanceOf(ledger, user.name);
       const pending = pendingDebitHours(requests, user.name);
       const available = balance - pending;
-      const need = Math.abs(Number(hours || 0));
+      const need = Math.abs(Number(effectiveHours || 0));
       if(need > available){
         return alert(`신청 가능 시간이 부족합니다.\n\n잔여 프리패스: ${balance}시간\n승인대기 사용/전환: ${pending}시간\n신청 가능: ${available}시간\n신청 요청: ${need}시간`);
       }
@@ -909,7 +926,7 @@ function FreepassRequestForm({ user }) {
       const {error}=await supabase.from('freepass_requests').insert({
         employee_id:user.id, employee_name:user.name, employee_store:user.store_name,
         request_type:requestType, use_type:requestType==='사용'?useType:null,
-        request_date:requestDate, use_start_time:useStartTime||null, hours:Number(hours),
+        request_date:requestDate, use_start_time:useStartTime||null, hours:Number(effectiveHours ?? hours),
         reason, evidence_photo_data:(requestType==='야근 적립'||requestType==='휴무출근 적립')?JSON.stringify(photoItems):null,
         status:user.role==='점장'?'최종승인대기':'점장승인대기', manager_status:user.role==='점장'?'본인점장자동승인':'대기', final_status:'대기', requested_at:new Date().toISOString(), manager_approved_by:user.role==='점장'?user.name:null, manager_approved_at:user.role==='점장'?new Date().toISOString():null
       });
@@ -923,7 +940,7 @@ function FreepassRequestForm({ user }) {
   return <div className="sectionCard">
     <h3>프리패스 신청</h3>
     <div className="formGrid">
-      <label>신청 유형<select value={requestType} onChange={e=>setRequestType(e.target.value)}><option>사용</option><option>월차 전환</option></select></label>
+      <label>신청 유형<select value={requestType} onChange={e=>{ const v=e.target.value; setRequestType(v); if(v==='월차 전환') setHours(10); }}><option>사용</option><option>월차 전환</option></select></label>
       {requestType==='사용' && <label>사용 구분<select value={useType} onChange={e=>setUseType(e.target.value)}><option>오전 늦게 출근</option><option>오후 일찍 퇴근</option></select></label>}
       <label>사용/적립일<input type="date" value={requestDate} onChange={e=>setRequestDate(e.target.value)} /></label>
       <label>시간<select value={hours} onChange={e=>setHours(Number(e.target.value))}>{requestType==='월차 전환'?<option value={10}>10시간</option>:<><option value={1}>1시간</option><option value={2}>2시간</option><option value={3}>3시간</option></>}</select></label>
