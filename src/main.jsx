@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v28.1-20260618104156';
+const APP_BUILD_VERSION = 'v28-20260618070018';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -1587,31 +1587,6 @@ function PushSettings({ user }) {
 }
 
 
-
-function MoreHub({ user, setTab }) {
-  const adminItems = [
-    { label:'최종 승인', tab:'freepass', show:isSuperAdmin(user) },
-    { label:'관리자 조정', tab:'freepass', show:isSuperAdmin(user) },
-    { label:'월 한도 설정', tab:'freepass', show:isSuperAdmin(user) },
-    { label:'반기 초기화', tab:'freepass', show:isSuperAdmin(user) },
-    { label:'기본 설정', tab:'settings', show:isAdminLike(user) },
-    { label:'알림 설정', tab:'pushSettings', show:true },
-    { label:'사용방법', tab:'guide', show:true },
-  ].filter(x=>x.show);
-
-  return (
-    <div className="moreHub sectionCard">
-      <h2>더보기</h2>
-      <p className="muted">자주 쓰지 않는 관리 기능과 설정을 모았습니다.</p>
-      <div className="moreGrid">
-        {adminItems.map(item=>(
-          <button key={item.label} onClick={()=>setTab(item.tab)}>{item.label}</button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function HomeDashboard({ user, setTab }) {
   const [happyCount,setHappyCount]=useState(0);
   const [reviewCount,setReviewCount]=useState(0);
@@ -1706,7 +1681,7 @@ function MobileBottomNav({ tab, setTab, user }) {
     {key:'mycalls', label:'해피콜'},
     {key:'freepass', label:'프리패스'},
     {key:'suggestions', label:'건의'},
-    {key:'more', label:'더보기'}
+    {key:'guide', label:'더보기'}
   ];
   return (
     <nav className="mobileBottomNav" aria-label="모바일 하단 메뉴">
