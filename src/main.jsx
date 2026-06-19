@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v28-20260618070018';
+const APP_BUILD_VERSION = 'v28.1-20260619050001';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -712,7 +712,7 @@ function FreepassModule({ user }) {
   if (isSuperAdmin(user)) tabs.push('최종 승인', '관리자 조정', '월 한도 설정', '반기 초기화');
   
   return (
-    <div>
+    <div className="freepassModule">
       <h2>프리패스</h2>
       <div className="filterBar moduleTabs">{tabs.map(t => <button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}</button>)}</div>
       {tab==='내 프리패스' && <FreepassMyPage user={user} />}
@@ -1675,6 +1675,70 @@ function HomeDashboard({ user, setTab }) {
 }
 
 
+
+function MobileSideDrawer({ open, onClose, user, setTab, onLogout, onPassword }) {
+  if (!open) return null;
+  const isAdmin = isAdminLike(user);
+  const isManager = user.role === '점장';
+  const isChecker = user.role === '검수자' || isAdminLike(user);
+
+  const go = (nextTab) => {
+    setTab(nextTab);
+    onClose();
+  };
+
+  return (
+    <div className="mobileDrawerOverlay" onClick={onClose}>
+      <aside className="mobileDrawer" onClick={e=>e.stopPropagation()} aria-label="모바일 메뉴">
+        <div className="drawerHead">
+          <div>
+            <strong>세찬컴퍼니</strong>
+            <p>{user.name} · {user.store_name} · {user.role || '직원'}</p>
+          </div>
+          <button className="drawerClose" onClick={onClose}>닫기</button>
+        </div>
+
+        <div className="drawerGroup">
+          <h4>주요 메뉴</h4>
+          <button onClick={()=>go('home')}>홈</button>
+          <button onClick={()=>go('mycalls')}>내 해피콜</button>
+          <button onClick={()=>go('freepass')}>프리패스</button>
+          <button onClick={()=>go('suggestions')}>건의/문의</button>
+        </div>
+
+        {(isManager || isChecker || isAdmin) && <div className="drawerGroup">
+          <h4>해피콜 관리</h4>
+          {isManager && <button onClick={()=>go('manager')}>매장 현황</button>}
+          {isManager && <button onClick={()=>go('storecalls')}>매장 리스트</button>}
+          {isManager && <button onClick={()=>go('storePerformance')}>직원별 현황</button>}
+          {(isAdmin || isChecker) && <button onClick={()=>go('review')}>검수</button>}
+          {(isAdmin || isChecker) && <button onClick={()=>go('allcalls')}>전체 해피콜</button>}
+          {(isAdmin || isChecker) && <button onClick={()=>go('performance')}>전체 직원 현황</button>}
+          {isAdmin && <button onClick={()=>go('refused')}>통화 불가 고객</button>}
+          {isAdmin && <button onClick={()=>go('rawupload')}>RAW 업로드</button>}
+          {isAdmin && <button onClick={()=>go('targetgen')}>해피콜 생성</button>}
+        </div>}
+
+        {isAdmin && <div className="drawerGroup">
+          <h4>기본 설정</h4>
+          <button onClick={()=>go('employees')}>직원관리</button>
+          <button onClick={()=>go('stores')}>매장관리</button>
+          <button onClick={()=>go('audit')}>감사로그</button>
+          <button onClick={()=>go('errors')}>오류보고</button>
+        </div>}
+
+        <div className="drawerGroup">
+          <h4>설정</h4>
+          <button onClick={()=>go('pushSettings')}>알림 설정</button>
+          <button onClick={()=>go('guide')}>사용방법</button>
+          <button onClick={onPassword}>비밀번호 변경</button>
+          <button className="dangerMenu" onClick={onLogout}>로그아웃</button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 function MobileBottomNav({ tab, setTab, user }) {
   const items = [
     {key:'home', label:'홈'},
@@ -1698,6 +1762,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
   const [tab, setTab] = useState('home');
   const [showPassword, setShowPassword] = useState(false);
   const [openMenu, setOpenMenu] = useState('');
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const isAdmin = isAdminLike(user);
   const isManager = user.role === '점장';
   const isChecker = user.role === '검수자' || isAdminLike(user);
@@ -1711,8 +1776,9 @@ function MainApp({ user, onLogout, onUserUpdate }) {
           <h1>세찬컴퍼니 인트라넷</h1>
           <p>{user.name} · {user.store_name} · {user.role || '직원'}</p>
         </div>
-        <div className="headerRight"><img className="headerLogo" src="./sechan-logo.png" alt="세찬컴퍼니 로고" onError={e=>{e.currentTarget.style.display='none'}} /><div className="headerActions"><button onClick={() => setShowPassword(true)} className="compactHeaderButton">비밀번호 변경</button><button onClick={onLogout} className="compactHeaderButton">로그아웃</button></div></div>
+        <div className="headerRight"><img className="headerLogo" src="./sechan-logo.png" alt="세찬컴퍼니 로고" onError={e=>{e.currentTarget.style.display='none'}} /><div className="headerActions desktopHeaderActions"><button onClick={() => setShowPassword(true)} className="compactHeaderButton">비밀번호 변경</button><button onClick={onLogout} className="compactHeaderButton">로그아웃</button></div><button className="mobileHamburgerBtn" onClick={()=>setMobileDrawerOpen(true)} aria-label="메뉴 열기">☰</button></div>
       </header>
+      <MobileSideDrawer open={mobileDrawerOpen} onClose={()=>setMobileDrawerOpen(false)} user={user} setTab={setTab} onLogout={onLogout} onPassword={()=>{setMobileDrawerOpen(false); setShowPassword(true);}} />
 
       <nav className="topNav compactNav">
         <button className={tab==='home'?'active':''} onClick={()=>setTab('home')}>홈</button>
