@@ -3910,3 +3910,187 @@ body{
     grid-template-columns:1fr !important;
   }
 }
+
+/* V28.3 Mobile Spacing / Width Optimization */
+@media(max-width:768px){
+  main,.container,.page,.content,.appMain{
+    padding-left:12px !important;
+    padding-right:12px !important;
+  }
+
+  .homeHero{
+    padding:16px !important;
+    margin:8px 0 12px !important;
+    border-radius:18px !important;
+    min-height:auto !important;
+  }
+  .homeHero h2{
+    font-size:20px !important;
+    line-height:1.25 !important;
+    margin:4px 0 6px !important;
+  }
+  .homeHero .muted,.homeHero p{
+    font-size:12px !important;
+    line-height:1.35 !important;
+  }
+
+  .dashboardGrid{
+    display:grid !important;
+    grid-template-columns:1fr 1fr !important;
+    gap:10px !important;
+  }
+  .dashboardCard{
+    min-height:86px !important;
+    padding:12px !important;
+    border-radius:15px !important;
+  }
+  .dashboardCard span{font-size:12px !important;line-height:1.2 !important;}
+  .dashboardCard strong{font-size:26px !important;margin:5px 0 3px !important;}
+  .dashboardCard em{font-size:11px !important;line-height:1.2 !important;}
+
+  .quickActionGrid,
+  .homeDashboard .quickActionGrid{
+    display:none !important;
+  }
+
+  .summaryGrid{
+    grid-template-columns:1fr 1fr !important;
+    gap:9px !important;
+  }
+  .summaryGrid .card{
+    min-height:82px !important;
+    padding:13px !important;
+  }
+  .summaryGrid .card strong{font-size:25px !important;}
+
+  .freepassModule > .moduleTabs button,
+  .freepassModule > .filterBar button,
+  .moduleTabs button,
+  .filterBar button{
+    min-height:40px !important;
+    font-size:13px !important;
+    border-radius:13px !important;
+  }
+
+  .sectionCard{
+    padding:16px !important;
+    margin:10px 0 !important;
+    border-radius:17px !important;
+  }
+  .sectionCard h2{font-size:22px !important;margin:0 0 12px !important;}
+  .sectionCard h3{font-size:18px !important;margin:0 0 10px !important;}
+  .sectionCard p{line-height:1.42 !important;}
+
+  .sectionCard table,
+  table{
+    min-width:0 !important;
+    width:max-content !important;
+    max-width:none !important;
+    table-layout:auto !important;
+  }
+
+  .sectionCard th,.sectionCard td,
+  table th,table td{
+    padding:9px 8px !important;
+    font-size:13px !important;
+    line-height:1.3 !important;
+  }
+
+  .sectionCard td[colspan],
+  table td[colspan]{
+    padding:14px 16px !important;
+    white-space:normal !important;
+    color:#64748b !important;
+  }
+
+  .sectionCard:has(table){
+    overflow-x:auto !important;
+    -webkit-overflow-scrolling:touch !important;
+  }
+
+  .freepassModule table th:nth-child(1),
+  .freepassModule table td:nth-child(1){
+    min-width:110px !important;
+    max-width:136px !important;
+  }
+  .freepassModule table th:nth-child(2),
+  .freepassModule table td:nth-child(2){
+    min-width:68px !important;
+    max-width:92px !important;
+  }
+  .freepassModule table th:nth-child(3),
+  .freepassModule table td:nth-child(3){
+    min-width:70px !important;
+    max-width:100px !important;
+  }
+  .freepassModule table th:nth-child(4),
+  .freepassModule table td:nth-child(4){
+    min-width:62px !important;
+    max-width:86px !important;
+  }
+  .freepassModule table th:nth-child(5),
+  .freepassModule table td:nth-child(5){
+    min-width:70px !important;
+    max-width:120px !important;
+  }
+  .freepassModule table th:nth-child(6),
+  .freepassModule table td:nth-child(6){
+    min-width:72px !important;
+    max-width:110px !important;
+  }
+
+  .sectionCard table th:first-child,
+  .sectionCard table td:first-child{
+    min-width:106px !important;
+    max-width:126px !important;
+  }
+  .sectionCard table th:nth-child(2),
+  .sectionCard table td:nth-child(2){
+    min-width:66px !important;
+    max-width:90px !important;
+  }
+  .sectionCard table th:nth-child(3),
+  .sectionCard table td:nth-child(3){
+    min-width:66px !important;
+    max-width:90px !important;
+  }
+
+  input[type="checkbox"]{
+    width:20px !important;
+    height:20px !important;
+    min-width:20px !important;
+    min-height:20px !important;
+    max-width:20px !important;
+    max-height:20px !important;
+    padding:0 !important;
+    margin:0 auto !important;
+  }
+
+  table select,
+  table input:not([type="checkbox"]){
+    min-width:96px !important;
+    width:96px !important;
+    height:38px !important;
+    min-height:38px !important;
+    font-size:13px !important;
+    border-radius:10px !important;
+    padding:0 10px !important;
+  }
+  table input[type="number"],
+  table input[type="text"]{
+    min-width:84px !important;
+    width:84px !important;
+  }
+
+  .buttonRow button,
+  .reviewActions button,
+  .sectionCard button{
+    min-height:42px !important;
+    font-size:14px !important;
+    border-radius:13px !important;
+  }
+}
+
+@media(max-width:420px){
+  .dashboardGrid{grid-template-columns:1fr 1fr !important;}
+}
