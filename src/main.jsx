@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v28.6-20260622033938';
+const APP_BUILD_VERSION = 'v28.7-20260622053535';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -425,11 +425,7 @@ function normalizeAccessoryItems(row) {
       if (Array.isArray(parsed) && parsed.length) return parsed;
     } catch {}
   }
-  return [{
-    category: row?.category || '기타',
-    item_name: row?.item_name || '-',
-    price: Number(row?.price || 0)
-  }];
+  return [{ model_name: row?.model_name || '', category: row?.category || '기타', item_name: row?.item_name || '-', price: Number(row?.price || 0) }];
 }
 
 function isPendingFreepassRequest(status) {
@@ -1660,8 +1656,8 @@ function PushSettings({ user }) {
 function AccessoryOrdersPage({ user }) {
   const categories = ['케이스','필름','충전기','보조배터리','기타'];
   const orderSources = ['개통','기존고객','워크인 고객'];
-  const returnReasons = ['고객 변심','기종 변경','색상 변경','불량','기타'];
-  const emptyItem = () => ({ category:'케이스', item_name:'', price:'' });
+  const returnReasons = ['고객 변심','상품 불량','주문 실수','재고 오류','기타'];
+  const emptyItem = () => ({ model_name:'', category:'케이스', item_name:'', price:'' });
 
   const [rows,setRows]=useState([]);
   const [active,setActive]=useState('pending');
@@ -1670,9 +1666,9 @@ function AccessoryOrdersPage({ user }) {
   const [employeeFilter,setEmployeeFilter]=useState('');
   const [categoryFilter,setCategoryFilter]=useState('');
   const [sourceFilter,setSourceFilter]=useState('');
-  const [returnReasonById,setReturnReasonById]=useState({});
-  const [arrivalDateById,setArrivalDateById]=useState({});
-  const [newOrder,setNewOrder]=useState({ customer_name:'', model_name:'', order_source:'개통', customer_payment_amount:'', items:[emptyItem()] });
+  const [search,setSearch]=useState('');
+  const [newOrder,setNewOrder]=useState({ customer_name:'', order_source:'개통', payment_type:'무료제공', customer_payment_amount:'', items:[emptyItem()] });
+  const [editingId,setEditingId]=useState(null);
   const [busy,setBusy]=useState(false);
 
   const isAdmin = isAdminLike(user);
@@ -1713,12 +1709,27 @@ function AccessoryOrdersPage({ user }) {
     return true;
   }
 
+  function overdueDays(dateStr){
+    if(!dateStr) return 0;
+    const today = new Date(); today.setHours(0,0,0,0);
+    const d = new Date(`${dateStr}T00:00:00`);
+    const diff = Math.floor((today - d)/(1000*60*60*24));
+    return diff > 0 ? diff : 0;
+  }
+
   function visibleRows(){
     let list = baseRowsByScope(scope);
     if (storeFilter && scope === 'all') list = list.filter(r => r.store_name === storeFilter);
     if (employeeFilter) list = list.filter(r => r.employee_name === employeeFilter);
     if (sourceFilter) list = list.filter(r => r.order_source === sourceFilter);
     if (categoryFilter) list = list.filter(r => normalizeAccessoryItems(r).some(item => item.category === categoryFilter));
+    const q = search.trim().toLowerCase();
+    if(q){
+      list = list.filter(r => {
+        const itemsText = normalizeAccessoryItems(r).map(i=>`${i.model_name||''} ${i.category||''} ${i.item_name||''}`).join(' ');
+        return `${r.order_code||''} ${r.customer_name_masked||''} ${r.model_name||''} ${r.item_name||''} ${itemsText}`.toLowerCase().includes(q);
+      });
+    }
     return list.filter(r => rowMatchesStatus(r, active));
   }
 
@@ -1731,34 +1742,24 @@ function AccessoryOrdersPage({ user }) {
     returned: activeBaseRows.filter(r=>rowMatchesStatus(r,'returned')).length,
   };
 
-  const ownRows = rows.filter(r=>r.employee_name===user.name);
-  const storeRows = rows.filter(r=>r.store_name===user.store_name);
   const filtered = visibleRows();
   const sumPrice = (list) => list.reduce((s,r)=>s+Number(r.price||0),0);
   const sumPayment = (list) => list.reduce((s,r)=>s+Number(r.customer_payment_amount||0),0);
-
-  const ownAmount = sumPrice(ownRows);
-  const storeAmount = sumPrice(storeRows);
-  const companyAmount = sumPrice(rows);
   const filteredAmount = sumPrice(filtered);
   const filteredPayment = sumPayment(filtered);
-
+  const filteredProfit = filteredPayment - filteredAmount;
   const employeeOptions = [...new Set(baseRowsByScope(scope).map(r=>r.employee_name).filter(Boolean))];
   const storeOptions = [...new Set(rows.map(r=>r.store_name).filter(Boolean))];
 
-  function updateItem(idx, patch){
-    setNewOrder(prev=>({...prev, items:prev.items.map((item,i)=>i===idx?{...item,...patch}:item)}));
-  }
+  function updateItem(idx, patch){ setNewOrder(prev=>({...prev, items:prev.items.map((item,i)=>i===idx?{...item,...patch}:item)})); }
   function addItem(){ setNewOrder(prev=>({...prev, items:[...prev.items, emptyItem()]})); }
   function removeItem(idx){ setNewOrder(prev=>({...prev, items:prev.items.length<=1?prev.items:prev.items.filter((_,i)=>i!==idx)})); }
 
   const orderTotal = newOrder.items.reduce((s,item)=>s+Number(item.price||0),0);
-  const paymentAmount = newOrder.customer_payment_amount === '' ? 0 : Number(newOrder.customer_payment_amount || 0);
+  const paymentAmount = newOrder.payment_type === '무료제공' ? 0 : Number(newOrder.customer_payment_amount || 0);
 
   async function generateOrderCode(){
-    const now = new Date();
-    const mm = String(now.getMonth()+1).padStart(2,'0');
-    const dd = String(now.getDate()).padStart(2,'0');
+    const now = new Date(); const mm = String(now.getMonth()+1).padStart(2,'0'); const dd = String(now.getDate()).padStart(2,'0');
     const prefix = `${mm}${dd}`;
     const {data,error}=await supabase.from('accessory_orders').select('order_code').like('order_code', `${prefix}%`);
     if(error) throw error;
@@ -1766,188 +1767,179 @@ function AccessoryOrdersPage({ user }) {
     return `${prefix}${String(maxNo+1).padStart(2,'0')}`;
   }
 
+  function cleanPayloadItems(){
+    return newOrder.items.map(item=>({ model_name:String(item.model_name||'').trim(), category:item.category, item_name:String(item.item_name||'').trim(), price:Number(item.price||0) })).filter(item=>item.model_name && item.item_name && item.price>0);
+  }
+
   async function createOrder(e){
     e.preventDefault();
-    const cleanItems = newOrder.items.map(item=>({category:item.category, item_name:String(item.item_name||'').trim(), price:Number(item.price||0)})).filter(item=>item.item_name && item.price>0);
+    const cleanItems = cleanPayloadItems();
     if(!newOrder.customer_name.trim()) return alert('고객명을 입력해주세요.');
-    if(!newOrder.model_name.trim()) return alert('모델명을 입력해주세요.');
-    if(!cleanItems.length) return alert('주문 품목을 1개 이상 입력해주세요.');
+    if(!cleanItems.length) return alert('품목별 모델명, 품목 상세명, 금액을 1개 이상 입력해주세요.');
     setBusy(true);
     try{
       const code = await generateOrderCode();
       const masked = maskCustomerName(newOrder.customer_name);
       const itemSummary = cleanItems.map(item=>item.item_name).join(', ');
+      const modelSummary = [...new Set(cleanItems.map(item=>item.model_name))].join(', ');
       const total = cleanItems.reduce((s,item)=>s+Number(item.price||0),0);
       const payload = {
-        order_code: code,
-        customer_name_masked: masked,
-        model_name: newOrder.model_name.trim(),
-        category: cleanItems.length === 1 ? cleanItems[0].category : '기타',
-        item_name: itemSummary,
-        items_json: cleanItems,
-        price: total,
-        customer_payment_amount: newOrder.customer_payment_amount === '' ? null : Number(newOrder.customer_payment_amount || 0),
-        payment_type: newOrder.customer_payment_amount === '' ? '무료제공' : '고객결제',
-        order_source: newOrder.order_source,
-        employee_id: user.id || null,
-        employee_name: user.name,
-        store_name: user.store_name,
-        order_completed: false,
-        store_arrived: false,
-        customer_received: false,
-        is_returned: false,
-        created_by: user.name
+        order_code: code, customer_name_masked: masked, model_name: modelSummary,
+        category: cleanItems.length === 1 ? cleanItems[0].category : '기타', item_name: itemSummary, items_json: cleanItems,
+        price: total, customer_payment_amount: newOrder.payment_type === '무료제공' ? null : Number(newOrder.customer_payment_amount || 0), payment_type: newOrder.payment_type,
+        order_source: newOrder.order_source, employee_id: user.id || null, employee_name: user.name, store_name: user.store_name,
+        order_completed: false, store_arrived: false, customer_received: false, is_returned: false,
+        status_history: [{at:new Date().toISOString(), by:user.name, action:'주문 생성'}], created_by: user.name
       };
       const {error}=await supabase.from('accessory_orders').insert(payload);
       if(error) throw error;
-      await writeAuditLog('악세사리주문생성','accessory_orders',code,user,`${masked} / ${newOrder.model_name} / ${itemSummary} / ${formatKRW(total)}`);
-      setNewOrder({customer_name:'', model_name:'', order_source:'개통', customer_payment_amount:'', items:[emptyItem()]});
-      setActive('pending');
-      alert(`주문건이 생성되었습니다.\n주문번호: ${code}`);
-      load();
-    }catch(e){
-      askErrorReport?.({user,currentTab:'악세사리 주문',actionName:'주문 생성',error:e});
-      alert(`주문 생성 실패: ${e.message || e}`);
+      await writeAuditLog('악세사리주문생성','accessory_orders',code,user,`${masked} / ${modelSummary} / ${itemSummary} / ${formatKRW(total)}`);
+      setNewOrder({customer_name:'', order_source:'개통', payment_type:'무료제공', customer_payment_amount:'', items:[emptyItem()]});
+      setActive('pending'); alert(`주문건이 생성되었습니다.\n주문번호: ${code}`); load();
+    }catch(e){ askErrorReport?.({user,currentTab:'악세사리 주문',actionName:'주문 생성',error:e}); alert(`주문 생성 실패: ${e.message || e}`);
+    }finally{ setBusy(false); }
+  }
+
+  function beginEdit(row){
+    const items = normalizeAccessoryItems(row).map(item=>({ model_name:item.model_name || row.model_name || '', category:item.category || '기타', item_name:item.item_name || '', price:item.price || '' }));
+    setEditingId(row.id);
+    setNewOrder({ customer_name: row.customer_name_masked || '', order_source: row.order_source || '개통', payment_type: row.payment_type || (row.customer_payment_amount ? '후불' : '무료제공'), customer_payment_amount: row.customer_payment_amount || '', items: items.length ? items : [emptyItem()] });
+    window.scrollTo({top:0, behavior:'smooth'});
+  }
+
+  async function saveEdit(e){
+    e.preventDefault(); const row = rows.find(r=>r.id===editingId); if(!row) return;
+    const cleanItems = cleanPayloadItems(); if(!cleanItems.length) return alert('품목별 모델명, 품목 상세명, 금액을 1개 이상 입력해주세요.');
+    setBusy(true);
+    try{
+      const itemSummary = cleanItems.map(item=>item.item_name).join(', ');
+      const modelSummary = [...new Set(cleanItems.map(item=>item.model_name))].join(', ');
+      const total = cleanItems.reduce((s,item)=>s+Number(item.price||0),0);
+      const {error}=await supabase.from('accessory_orders').update({
+        model_name:modelSummary, category: cleanItems.length === 1 ? cleanItems[0].category : '기타', item_name:itemSummary, items_json:cleanItems, price:total,
+        customer_payment_amount: newOrder.payment_type === '무료제공' ? null : Number(newOrder.customer_payment_amount || 0), payment_type:newOrder.payment_type, order_source:newOrder.order_source, updated_by:user.name
+      }).eq('id', editingId);
+      if(error) throw error;
+      await writeAuditLog('악세사리주문수정','accessory_orders',row.order_code,user,itemSummary);
+      setEditingId(null); setNewOrder({customer_name:'', order_source:'개통', payment_type:'무료제공', customer_payment_amount:'', items:[emptyItem()]}); load();
+    }catch(e){ askErrorReport?.({user,currentTab:'악세사리 주문',actionName:'주문 수정',error:e}); alert(`수정 실패: ${e.message || e}`);
     }finally{ setBusy(false); }
   }
 
   async function updateOrder(row, patch, actionName, detail=''){
     setBusy(true);
     try{
-      const {error}=await supabase.from('accessory_orders').update({...patch, updated_by:user.name}).eq('id', row.id);
+      const prevHist = Array.isArray(row.status_history) ? row.status_history : [];
+      const nextHist = [...prevHist, {at:new Date().toISOString(), by:user.name, action:actionName.replace('악세사리',''), detail}];
+      const {error}=await supabase.from('accessory_orders').update({...patch, status_history:nextHist, updated_by:user.name}).eq('id', row.id);
       if(error) throw error;
-      await writeAuditLog(actionName,'accessory_orders',row.order_code,user,detail);
-      load();
-    }catch(e){
-      askErrorReport?.({user,currentTab:'악세사리 주문',actionName,error:e});
-      alert(`처리 실패: ${e.message || e}`);
+      await writeAuditLog(actionName,'accessory_orders',row.order_code,user,detail); load();
+    }catch(e){ askErrorReport?.({user,currentTab:'악세사리 주문',actionName,error:e}); alert(`처리 실패: ${e.message || e}`);
     }finally{ setBusy(false); }
   }
 
-  function markCompleted(row){
-    const arrival = arrivalDateById[row.id];
-    if(!arrival) return alert('주문 완료 체크 시 도착 예정 날짜를 먼저 선택해주세요.');
-    updateOrder(row,{order_completed:true, order_completed_at:new Date().toISOString(), expected_arrival_date:arrival},'악세사리주문완료',`도착 예정일 ${arrival}`);
+  function handleStatusChange(row){
+    const current = accessoryStatusKey(row);
+    let options = [];
+    if(current === 'pending') options = ['주문 완료'];
+    if(current === 'completed') options = ['매장 도착','반품'];
+    if(current === 'arrived') options = ['고객 수령','반품'];
+    if(current === 'received') options = ['반품'];
+    if(!options.length) return alert('변경 가능한 상태가 없습니다.');
+    const choice = prompt(`변경할 상태를 입력해주세요.\n${options.join(' / ')}`);
+    if(!choice) return;
+    if(!options.includes(choice)) return alert('선택 가능한 상태만 입력해주세요.');
+    if(choice === '주문 완료'){
+      const arrival = prompt('도착 예정일을 입력해주세요. 예: 2026-06-25');
+      if(!arrival) return;
+      return updateOrder(row,{order_completed:true, order_completed_at:new Date().toISOString(), expected_arrival_date:arrival},'악세사리주문완료',`도착 예정일 ${arrival}`);
+    }
+    if(choice === '매장 도착') return updateOrder(row,{store_arrived:true, store_arrived_at:new Date().toISOString()},'악세사리매장도착',row.customer_name_masked);
+    if(choice === '고객 수령') return updateOrder(row,{customer_received:true, customer_received_at:new Date().toISOString()},'악세사리고객수령',row.customer_name_masked);
+    if(choice === '반품'){
+      const reason = prompt(`반품 사유를 입력해주세요.\n${returnReasons.join(' / ')}`, '고객 변심') || '기타';
+      return updateOrder(row,{is_returned:true, returned_at:new Date().toISOString(), return_reason:reason},'악세사리반품',reason);
+    }
   }
-  function markArrived(row){
-    if(!row.order_completed) return alert('주문 완료 전에는 매장 도착 처리할 수 없습니다.');
-    updateOrder(row,{store_arrived:true, store_arrived_at:new Date().toISOString()},'악세사리매장도착',row.customer_name_masked);
+
+  function showHistory(row){
+    const hist = Array.isArray(row.status_history) ? row.status_history : [];
+    if(!hist.length) return alert('상태 변경 이력이 없습니다.');
+    alert(hist.map(h=>`${String(h.at||'').replace('T',' ').slice(0,16)}\n${h.by||'-'} · ${h.action||'-'}${h.detail?`\n${h.detail}`:''}`).join('\n\n'));
   }
-  function markReceived(row){
-    if(!row.store_arrived) return alert('매장 도착 전에는 고객 수령 처리할 수 없습니다.');
-    updateOrder(row,{customer_received:true, customer_received_at:new Date().toISOString()},'악세사리고객수령',row.customer_name_masked);
-  }
-  function markReturned(row){
-    const reason = returnReasonById[row.id] || '기타';
-    if(!confirm(`반품 처리할까요?\n사유: ${reason}`)) return;
-    updateOrder(row,{is_returned:true, returned_at:new Date().toISOString(), return_reason:reason},'악세사리반품',reason);
-  }
+
   async function deleteOrder(row){
+    if(row.customer_received && !isAdmin) return alert('고객 수령 완료건은 관리자만 삭제할 수 있습니다.');
     if(row.employee_name !== user.name && !isAdmin) return alert('내 주문건만 삭제할 수 있습니다.');
     if(!confirm(`주문건 ${row.order_code}을 삭제할까요?\n삭제 후 목록에서 보이지 않습니다.`)) return;
     setBusy(true);
     try{
-      const {error}=await supabase.from('accessory_orders').delete().eq('id', row.id);
-      if(error) throw error;
-      await writeAuditLog('악세사리주문삭제','accessory_orders',row.order_code,user,row.customer_name_masked);
-      load();
-    }catch(e){
-      askErrorReport?.({user,currentTab:'악세사리 주문',actionName:'주문 삭제',error:e});
-      alert(`삭제 실패: ${e.message || e}`);
+      const {error}=await supabase.from('accessory_orders').delete().eq('id', row.id); if(error) throw error;
+      await writeAuditLog('악세사리주문삭제','accessory_orders',row.order_code,user,row.customer_name_masked); load();
+    }catch(e){ askErrorReport?.({user,currentTab:'악세사리 주문',actionName:'주문 삭제',error:e}); alert(`삭제 실패: ${e.message || e}`);
     }finally{ setBusy(false); }
   }
 
   return (
     <div className="accessoryModule">
       <h2>악세사리 주문 관리</h2>
-
-      <div className="accessorySummaryGrid">
-        <div className="accessoryStat"><span>내 주문금액</span><strong>{formatKRW(ownAmount)}</strong></div>
-        <div className="accessoryStat"><span>매장 주문금액</span><strong>{formatKRW(storeAmount)}</strong></div>
-        {canSeeAll && <div className="accessoryStat"><span>회사 주문금액</span><strong>{formatKRW(companyAmount)}</strong></div>}
-        <div className="accessoryStat"><span>현재 목록 합계</span><strong>{formatKRW(filteredAmount)}</strong></div>
-        <div className="accessoryStat"><span>받기로 한 금액</span><strong>{formatKRW(filteredPayment)}</strong></div>
+      <div className="accessorySummaryGrid accessorySummaryCompact">
+        <div className="accessoryStat"><span>주문 원가</span><strong>{formatKRW(filteredAmount)}</strong></div>
+        <div className="accessoryStat"><span>수납 예정</span><strong>{formatKRW(filteredPayment)}</strong></div>
+        <div className="accessoryStat"><span>예상 수익</span><strong>{formatKRW(filteredProfit)}</strong></div>
       </div>
-
       <div className="sectionCard accessoryFormCard">
-        <h3>주문건 생성</h3>
-        <form onSubmit={createOrder}>
+        <h3>{editingId ? '주문건 수정' : '주문건 생성'}</h3>
+        <form onSubmit={editingId ? saveEdit : createOrder}>
           <div className="accessoryFormGrid baseInfo">
-            <label>고객명<input value={newOrder.customer_name} onChange={e=>setNewOrder(p=>({...p,customer_name:e.target.value}))} placeholder="예: 홍길동" /></label>
-            <label>모델명<input value={newOrder.model_name} onChange={e=>setNewOrder(p=>({...p,model_name:e.target.value}))} placeholder="예: 아이폰 16 Pro" /></label>
+            <label>고객명<input value={newOrder.customer_name} disabled={!!editingId} onChange={e=>setNewOrder(p=>({...p,customer_name:e.target.value}))} placeholder="예: 홍길동" /></label>
             <label>주문경로<select value={newOrder.order_source} onChange={e=>setNewOrder(p=>({...p,order_source:e.target.value}))}>{orderSources.map(c=><option key={c}>{c}</option>)}</select></label>
-            <label>고객에게 받기로 한 금액<input type="number" value={newOrder.customer_payment_amount} onChange={e=>setNewOrder(p=>({...p,customer_payment_amount:e.target.value}))} placeholder="공란이면 무료제공" /></label>
+            <label>수납방식<select value={newOrder.payment_type} onChange={e=>setNewOrder(p=>({...p,payment_type:e.target.value, customer_payment_amount:e.target.value==='무료제공'?'':p.customer_payment_amount}))}><option>무료제공</option><option>선불</option><option>후불</option></select></label>
+            <label>수납 예정 금액<input type="number" disabled={newOrder.payment_type==='무료제공'} value={newOrder.customer_payment_amount} onChange={e=>setNewOrder(p=>({...p,customer_payment_amount:e.target.value}))} placeholder="무료제공이면 공란" /></label>
           </div>
-
           <div className="accessoryItemsBox">
             <div className="accessoryItemsHead"><h4>주문 품목</h4><button type="button" onClick={addItem}>품목 추가</button></div>
             {newOrder.items.map((item,idx)=>(
-              <div className="accessoryItemRow" key={idx}>
+              <div className="accessoryItemRow v287" key={idx}>
+                <input value={item.model_name} onChange={e=>updateItem(idx,{model_name:e.target.value})} placeholder="모델명 예) 아이폰 17 프로맥스" />
                 <select value={item.category} onChange={e=>updateItem(idx,{category:e.target.value})}>{categories.map(c=><option key={c}>{c}</option>)}</select>
-                <input value={item.item_name} onChange={e=>updateItem(idx,{item_name:e.target.value})} placeholder="품목명" />
-                <input type="number" value={item.price} onChange={e=>updateItem(idx,{price:e.target.value})} placeholder="금액" />
-                <button type="button" onClick={()=>removeItem(idx)} disabled={newOrder.items.length<=1}>삭제</button>
+                <input value={item.item_name} onChange={e=>updateItem(idx,{item_name:e.target.value})} placeholder="예) 투명 케이스 / 다이어리 케이스(레드)" />
+                <input type="number" value={item.price} onChange={e=>updateItem(idx,{price:e.target.value})} placeholder="원가" />
+                <button type="button" className="tinyDeleteBtn" onClick={()=>removeItem(idx)} disabled={newOrder.items.length<=1}>삭제</button>
               </div>
             ))}
-            <div className="accessoryOrderTotal">
-              <span>주문 원가 합계</span><strong>{formatKRW(orderTotal)}</strong>
-              <span>고객 수납 예정</span><strong>{newOrder.customer_payment_amount === '' ? '무료제공' : formatKRW(paymentAmount)}</strong>
-            </div>
+            <div className="accessoryOrderTotal"><span>주문 원가 합계</span><strong>{formatKRW(orderTotal)}</strong><span>고객 수납 예정</span><strong>{newOrder.payment_type === '무료제공' ? '무료제공' : `${newOrder.payment_type} · ${formatKRW(paymentAmount)}`}</strong></div>
           </div>
-
-          <button className="primary accessorySubmitBtn" disabled={busy}>주문건 생성</button>
+          <div className="accessoryFormActions"><button className="primary accessorySubmitBtn" disabled={busy}>{editingId ? '수정 저장' : '주문건 생성'}</button>{editingId && <button type="button" onClick={()=>{setEditingId(null); setNewOrder({customer_name:'',order_source:'개통',payment_type:'무료제공',customer_payment_amount:'',items:[emptyItem()]});}}>취소</button>}</div>
         </form>
       </div>
-
       <div className="sectionCard accessoryListCard">
-        <div className="accessoryMainTabs">
-          {availableScopes().map(s=><button key={s.key} className={scope===s.key?'active':''} onClick={()=>setScope(s.key)}>{s.label}</button>)}
-        </div>
-
-        <div className="accessoryTabs">
+        <div className="accessoryMainTabs">{availableScopes().map(s=><button key={s.key} className={scope===s.key?'active':''} onClick={()=>setScope(s.key)}>{s.label}</button>)}</div>
+        <div className="accessoryTabs v287">
           <button className={active==='pending'?'active':''} onClick={()=>setActive('pending')}>주문 미완료 <b>{counts.pending}</b></button>
           <button className={active==='completed'?'active':''} onClick={()=>setActive('completed')}>주문 완료 <b>{counts.completed}</b></button>
           <button className={active==='arrived'?'active':''} onClick={()=>setActive('arrived')}>매장 도착 <b>{counts.arrived}</b></button>
           <button className={active==='received'?'active':''} onClick={()=>setActive('received')}>고객 수령 <b>{counts.received}</b></button>
           <button className={active==='returned'?'active':''} onClick={()=>setActive('returned')}>반품 <b>{counts.returned}</b></button>
         </div>
-
-        {scope !== 'mine' && <div className="accessoryFilters">
+        <div className="accessoryFilters">
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="주문번호/고객명/모델명/품목 검색" />
           {scope==='all' && <select value={storeFilter} onChange={e=>setStoreFilter(e.target.value)}><option value="">전체 매장</option>{storeOptions.map(s=><option key={s}>{s}</option>)}</select>}
-          <select value={employeeFilter} onChange={e=>setEmployeeFilter(e.target.value)}><option value="">전체 담당자</option>{employeeOptions.map(n=><option key={n}>{n}</option>)}</select>
-          <select value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}><option value="">전체 카테고리</option>{categories.map(c=><option key={c}>{c}</option>)}</select>
-          <select value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)}><option value="">전체 경로</option>{orderSources.map(c=><option key={c}>{c}</option>)}</select>
-        </div>}
-
+          {scope !== 'mine' && <select value={employeeFilter} onChange={e=>setEmployeeFilter(e.target.value)}><option value="">전체 담당자</option>{employeeOptions.map(n=><option key={n}>{n}</option>)}</select>}
+          {scope !== 'mine' && <select value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}><option value="">전체 카테고리</option>{categories.map(c=><option key={c}>{c}</option>)}</select>}
+          {scope !== 'mine' && <select value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)}><option value="">전체 경로</option>{orderSources.map(c=><option key={c}>{c}</option>)}</select>}
+        </div>
         <div className="accessoryOrderList">
           {filtered.map(row=>{
-            const items = normalizeAccessoryItems(row);
-            return (
-              <div className="accessoryOrderCard" key={row.id}>
-                <div className="accessoryOrderTop">
-                  <div><strong>{row.order_code}</strong><p>{row.customer_name_masked} · {row.model_name}</p></div>
-                  <span className={`accessoryBadge ${accessoryStatusKey(row)}`}>{accessoryOrderStatus(row)}</span>
-                </div>
-                <div className="accessoryItemsView">
-                  {items.map((item,idx)=><p key={idx}><b>{idx+1}. {item.category}</b>{item.item_name} · {formatKRW(item.price)}</p>)}
-                </div>
-                <div className="accessoryMeta">
-                  <p><b>주문 원가</b>{formatKRW(row.price)}</p>
-                  <p><b>받기로 한 금액</b>{row.customer_payment_amount === null || row.customer_payment_amount === undefined ? '무료제공' : formatKRW(row.customer_payment_amount)}</p>
-                  <p><b>경로</b>{row.order_source}</p>
-                  <p><b>담당</b>{row.store_name} · {row.employee_name}</p>
-                  <p><b>예정</b>{row.expected_arrival_date || '-'}</p>
-                  <p><b>반품사유</b>{row.return_reason || '-'}</p>
-                </div>
-                <div className="accessoryActions">
-                  {!row.order_completed && !row.is_returned && <><input type="date" value={arrivalDateById[row.id]||''} onChange={e=>setArrivalDateById(p=>({...p,[row.id]:e.target.value}))} /><button disabled={busy} onClick={()=>markCompleted(row)}>주문 완료</button></>}
-                  {row.order_completed && !row.store_arrived && !row.is_returned && <button disabled={busy} onClick={()=>markArrived(row)}>매장 도착</button>}
-                  {row.store_arrived && !row.customer_received && !row.is_returned && <button disabled={busy} onClick={()=>markReceived(row)}>고객 수령</button>}
-                  {!row.customer_received && !row.is_returned && <><select value={returnReasonById[row.id]||'고객 변심'} onChange={e=>setReturnReasonById(p=>({...p,[row.id]:e.target.value}))}>{returnReasons.map(r=><option key={r}>{r}</option>)}</select><button className="dangerBtn" disabled={busy} onClick={()=>markReturned(row)}>반품</button></>}
-                  {(row.employee_name === user.name || isAdmin) && <button disabled={busy} onClick={()=>deleteOrder(row)}>삭제</button>}
-                </div>
-              </div>
-            );
+            const items = normalizeAccessoryItems(row); const od = overdueDays(row.expected_arrival_date); const longUnclaimed = row.store_arrived && !row.customer_received && !row.is_returned ? od : 0;
+            return <div className="accessoryOrderCard compact" key={row.id}>
+              <div className="accessoryOrderTop"><div><strong>{row.order_code}</strong><p>{row.customer_name_masked} · {items[0]?.model_name || row.model_name}</p></div><span className={`accessoryBadge ${accessoryStatusKey(row)}`}>{accessoryOrderStatus(row)}</span></div>
+              {(od > 0 && row.order_completed && !row.store_arrived && !row.is_returned) && <div className="accessoryWarning">예정일 초과 {od}일</div>}
+              {longUnclaimed >= 3 && <div className="accessoryWarning">장기 미수령 {longUnclaimed}일</div>}
+              <div className="accessoryItemsView compact">{items.map((item,idx)=><p key={idx}><b>{idx+1}. {item.category}</b><span>{item.model_name ? `${item.model_name} · ` : ''}{item.item_name} · {formatKRW(item.price)}</span></p>)}</div>
+              <div className="accessoryMeta compact"><p><b>원가</b>{formatKRW(row.price)}</p><p><b>수납</b>{row.customer_payment_amount === null || row.customer_payment_amount === undefined ? '무료제공' : `${row.payment_type || '후불'} · ${formatKRW(row.customer_payment_amount)}`}</p><p><b>수익</b>{formatKRW(Number(row.customer_payment_amount||0)-Number(row.price||0))}</p><p><b>담당</b>{row.store_name} · {row.employee_name}</p><p><b>예정</b>{row.expected_arrival_date || '-'}</p></div>
+              <div className="accessoryActions compact">{!row.is_returned && <button disabled={busy} onClick={()=>handleStatusChange(row)}>상태변경</button>}<button disabled={busy} onClick={()=>beginEdit(row)}>수정</button><button disabled={busy} onClick={()=>showHistory(row)}>이력</button>{(row.employee_name === user.name || isAdmin) && <button disabled={busy} onClick={()=>deleteOrder(row)}>삭제</button>}</div>
+            </div>
           })}
           {!filtered.length && <p className="emptyAccessory">표시할 주문건이 없습니다.</p>}
         </div>

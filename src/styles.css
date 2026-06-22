@@ -4329,3 +4329,41 @@ body{
   .accessoryTabs{grid-template-columns:1fr !important;}
   .accessoryActions select{width:100% !important;}
 }
+
+/* V28.7: Mobile Freepass Readability + Accessory Order UX */
+@media(max-width:768px){
+  .freepassModule .sectionCard{overflow:hidden !important;}
+  .freepassModule .sectionCard table{min-width:560px !important;width:max-content !important;table-layout:auto !important;}
+  .freepassModule .sectionCard:has(table){overflow-x:auto !important;-webkit-overflow-scrolling:touch !important;}
+  .freepassModule .sectionCard th,.freepassModule .sectionCard td{white-space:nowrap !important;vertical-align:middle !important;padding:10px 12px !important;font-size:13px !important;line-height:1.25 !important;}
+  .freepassModule .sectionCard td{max-width:160px !important;overflow:hidden !important;text-overflow:ellipsis !important;}
+  .freepassModule .sectionCard td:first-child,.freepassModule .sectionCard th:first-child{min-width:120px !important;}
+  .freepassModule .sectionCard td:nth-child(2),.freepassModule .sectionCard th:nth-child(2){min-width:96px !important;}
+  .freepassModule .sectionCard td:nth-child(3),.freepassModule .sectionCard th:nth-child(3){min-width:64px !important;}
+  .freepassModule .sectionCard td:nth-child(4),.freepassModule .sectionCard th:nth-child(4){min-width:96px !important;}
+  .freepassModule .sectionCard td:nth-child(5),.freepassModule .sectionCard th:nth-child(5){min-width:104px !important;}
+  .freepassModule input[type="checkbox"]{width:20px !important;height:20px !important;min-width:20px !important;min-height:20px !important;}
+}
+.accessorySummaryCompact{grid-template-columns:repeat(3,1fr);}
+.accessoryFormActions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+.accessoryItemRow.v287{grid-template-columns:1fr 140px 1.4fr 120px 64px;}
+.tinyDeleteBtn{min-height:36px !important;padding:0 10px !important;font-size:12px !important;border-radius:10px !important;background:#6b7280 !important;color:#fff !important;}
+.accessoryTabs.v287{display:grid;grid-template-columns:repeat(5,1fr);}
+.accessoryOrderCard.compact{padding:14px;}
+.accessoryItemsView.compact p{display:flex;gap:8px;align-items:flex-start;}
+.accessoryItemsView.compact b{min-width:72px;}
+.accessoryMeta.compact{grid-template-columns:repeat(5,1fr);}
+.accessoryActions.compact{display:grid;grid-template-columns:repeat(4,1fr);}
+.accessoryWarning{background:#fee2e2;color:#991b1b;border-radius:12px;padding:8px 10px;font-size:13px;font-weight:900;margin:8px 0;}
+@media(max-width:768px){
+  .accessorySummaryCompact{grid-template-columns:1fr 1fr !important;}
+  .accessoryItemRow.v287{grid-template-columns:1fr !important;}
+  .tinyDeleteBtn{width:auto !important;max-width:92px !important;min-height:34px !important;justify-self:end;}
+  .accessoryTabs.v287{grid-template-columns:1fr !important;gap:8px !important;}
+  .accessoryOrderCard.compact{padding:13px !important;}
+  .accessoryItemsView.compact p{display:block !important;margin:6px 0 !important;}
+  .accessoryMeta.compact{grid-template-columns:1fr 1fr !important;}
+  .accessoryActions.compact{grid-template-columns:1fr 1fr !important;gap:8px !important;}
+  .accessoryFilters{grid-template-columns:1fr 1fr !important;}
+  .accessoryFilters input{grid-column:1/-1;}
+}
