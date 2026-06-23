@@ -4368,25 +4368,170 @@ body{
   .accessoryFilters input{grid-column:1/-1;}
 }
 
-/* V28.8 dashboard/modal/accessory UI corrections */
-.modal,.dialog,.popup,.approvalModal,.finalApprovalModal,.freepassModal,[class*="modal"],[class*="Modal"]{max-height:min(90vh,760px)!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;}
-.modalContent,.dialogContent,.popupContent,[class*="modalContent"],[class*="ModalContent"]{max-height:calc(90vh - 32px)!important;overflow-y:auto!important;padding-bottom:24px!important;}
-.approvalActions,.modalActions,.dialogActions,.finalApprovalActions{position:sticky;bottom:0;background:inherit;padding-top:12px;padding-bottom:12px;z-index:5;}
-.accessoryMainTabs button,.accessoryTabs.v287 button{min-height:40px!important;border-radius:14px!important;padding:0 10px!important;font-size:14px!important;font-weight:900!important;}
-.accessoryMainTabs button.active,.accessoryTabs.v287 button.active{background:#2563eb!important;color:#fff!important;border-color:#2563eb!important;}
-.accessoryFormActions{display:grid!important;grid-template-columns:1fr 1fr!important;gap:10px!important;align-items:center!important;}
-.accessoryFormActions button{width:100%!important;min-height:48px!important;border-radius:14px!important;margin:0!important;}
-.tinyDeleteBtn{min-height:34px!important;height:34px!important;width:auto!important;min-width:58px!important;padding:0 10px!important;font-size:12px!important;border-radius:10px!important;justify-self:end!important;}
-.accessoryStatusSelect{min-height:42px!important;border-radius:12px!important;border:1px solid #d1d5db!important;background:#fff!important;color:#111827!important;font-weight:800!important;padding:0 12px!important;width:100%!important;}
-.accessoryActions.compact{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:8px!important;}
-.accessoryActions.compact button,.accessoryActions.compact select{min-height:42px!important;font-size:13px!important;border-radius:12px!important;padding:0 8px!important;}
+/* V28.9 Suggestions permission + Happycall assignment toggle */
+.employeeTable select{
+  min-width:86px;
+}
+.employeeAddGrid select{
+  min-width:0;
+}
 @media(max-width:768px){
-  .accessoryMainTabs{display:grid!important;grid-template-columns:repeat(3,1fr)!important;gap:8px!important;}
-  .accessoryTabs.v287{display:grid!important;grid-template-columns:repeat(2,1fr)!important;gap:8px!important;}
-  .accessoryTabs.v287 button{width:100%!important;min-height:40px!important;}
-  .accessoryActions.compact{grid-template-columns:repeat(2,1fr)!important;}
-  .accessoryFormActions{grid-template-columns:1fr 1fr!important;}
-  .accessoryFormActions button{min-height:46px!important;}
-  .statsGrid .card,.dashboardGrid .card,.happycallStats .card,.kpiGrid .card{padding:14px!important;min-height:96px!important;}
-  .statsGrid .card strong,.dashboardGrid .card strong,.happycallStats .card strong,.kpiGrid .card strong{font-size:28px!important;}
+  .employeeTable th,
+  .employeeTable td{
+    padding:9px 8px !important;
+    white-space:nowrap !important;
+  }
+  .employeeTable select{
+    min-width:78px !important;
+    width:auto !important;
+    height:38px !important;
+  }
+}
+
+/* V29.0 직원관리 모바일 전용 최적화 */
+.employeeMobileToolbar{
+  display:flex;
+  justify-content:flex-end;
+  margin:0 0 12px;
+}
+.employeeMobileToolbar button{
+  min-height:42px;
+  border-radius:14px;
+  padding:0 16px;
+}
+.employeeStatusTabs{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+.employeeStatusTabs button{
+  min-height:44px;
+  border-radius:14px;
+  font-size:15px;
+}
+.employeeAssignToggle{
+  border:0;
+  border-radius:999px;
+  min-width:66px;
+  height:34px;
+  font-weight:900;
+  color:#fff;
+  cursor:pointer;
+}
+.employeeAssignToggle.on{background:#2563eb;}
+.employeeAssignToggle.off{background:#9ca3af;}
+
+@media(max-width:768px){
+  .employeeMobileToolbar{
+    justify-content:stretch;
+  }
+  .employeeMobileToolbar button{
+    width:100%;
+  }
+
+  .employeeAddGrid{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:10px !important;
+    padding:16px !important;
+  }
+  .employeeAddGrid input,
+  .employeeAddGrid select,
+  .employeeAddGrid button{
+    width:100% !important;
+    min-height:44px !important;
+    border-radius:14px !important;
+    font-size:15px !important;
+  }
+
+  .employeeTableWrap{
+    padding:0 !important;
+    background:transparent !important;
+    border:0 !important;
+    box-shadow:none !important;
+    overflow:visible !important;
+  }
+
+  .employeeTable,
+  .employeeTable thead,
+  .employeeTable tbody,
+  .employeeTable tr,
+  .employeeTable td{
+    display:block !important;
+    width:100% !important;
+  }
+
+  .employeeTable thead{
+    display:none !important;
+  }
+
+  .employeeTable tr{
+    background:#fff !important;
+    border:1px solid #e5e7eb !important;
+    border-radius:18px !important;
+    box-shadow:0 2px 8px rgba(15,23,42,.04) !important;
+    padding:14px !important;
+    margin:0 0 12px !important;
+  }
+
+  .employeeTable td{
+    border:0 !important;
+    padding:7px 0 !important;
+    display:grid !important;
+    grid-template-columns:82px minmax(0,1fr) !important;
+    gap:10px !important;
+    align-items:center !important;
+    white-space:normal !important;
+  }
+
+  .employeeTable td::before{
+    content:attr(data-label);
+    color:#64748b;
+    font-size:13px;
+    font-weight:900;
+  }
+
+  .employeeTable .employeeNameCell{
+    display:block !important;
+    font-size:20px !important;
+    font-weight:900 !important;
+    padding-bottom:10px !important;
+    border-bottom:1px solid #f1f5f9 !important;
+    margin-bottom:4px !important;
+  }
+  .employeeTable .employeeNameCell::before{
+    content:none !important;
+  }
+
+  .employeeTable select,
+  .employeeTable input,
+  .employeeTable button{
+    width:100% !important;
+    min-width:0 !important;
+    min-height:40px !important;
+    border-radius:12px !important;
+    font-size:14px !important;
+  }
+
+  .employeeTable .passwordEdit{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:8px !important;
+  }
+
+  .employeeTable td[data-label="상세"],
+  .employeeTable td[data-label="검수매장"],
+  .employeeTable td[data-label="저장"]{
+    grid-template-columns:1fr !important;
+  }
+  .employeeTable td[data-label="상세"]::before,
+  .employeeTable td[data-label="검수매장"]::before,
+  .employeeTable td[data-label="저장"]::before{
+    content:none !important;
+  }
+
+  .employeeAssignToggle{
+    width:76px !important;
+    justify-self:start !important;
+  }
 }
