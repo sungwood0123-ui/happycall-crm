@@ -4368,170 +4368,264 @@ body{
   .accessoryFilters input{grid-column:1/-1;}
 }
 
-/* V28.9 Suggestions permission + Happycall assignment toggle */
-.employeeTable select{
-  min-width:86px;
-}
-.employeeAddGrid select{
-  min-width:0;
-}
+/* V29.1 공통 모바일 UI 리팩토링: 카드형/소형 버튼/가로스크롤 최소화 */
+
+/* 전체 버튼 과대 방지 */
 @media(max-width:768px){
-  .employeeTable th,
-  .employeeTable td{
-    padding:9px 8px !important;
-    white-space:nowrap !important;
+  button,
+  .primary,
+  select,
+  input {
+    min-height: 42px !important;
   }
-  .employeeTable select{
-    min-width:78px !important;
-    width:auto !important;
-    height:38px !important;
+
+  button,
+  .primary {
+    border-radius: 12px !important;
+    font-size: 14px !important;
+    padding: 0 12px !important;
+  }
+
+  .filterBar button,
+  .tabBar button,
+  .accessoryTabs button,
+  .accessoryMainTabs button,
+  .employeeStatusTabs button {
+    min-height: 40px !important;
+    font-size: 14px !important;
+  }
+
+  .sectionCard {
+    padding: 16px !important;
+    border-radius: 18px !important;
+  }
+
+  h2 {
+    font-size: 28px !important;
+    line-height: 1.15 !important;
+    margin-bottom: 16px !important;
   }
 }
 
-/* V29.0 직원관리 모바일 전용 최적화 */
-.employeeMobileToolbar{
-  display:flex;
-  justify-content:flex-end;
-  margin:0 0 12px;
-}
-.employeeMobileToolbar button{
-  min-height:42px;
-  border-radius:14px;
-  padding:0 16px;
-}
-.employeeStatusTabs{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:10px;
-}
-.employeeStatusTabs button{
-  min-height:44px;
-  border-radius:14px;
-  font-size:15px;
-}
-.employeeAssignToggle{
-  border:0;
-  border-radius:999px;
-  min-width:66px;
-  height:34px;
-  font-weight:900;
-  color:#fff;
-  cursor:pointer;
-}
-.employeeAssignToggle.on{background:#2563eb;}
-.employeeAssignToggle.off{background:#9ca3af;}
-
+/* 직원관리 모바일: 카드 폭/높이 정상화 */
 @media(max-width:768px){
-  .employeeMobileToolbar{
-    justify-content:stretch;
-  }
-  .employeeMobileToolbar button{
-    width:100%;
-  }
-
-  .employeeAddGrid{
-    display:grid !important;
-    grid-template-columns:1fr !important;
-    gap:10px !important;
-    padding:16px !important;
-  }
-  .employeeAddGrid input,
-  .employeeAddGrid select,
-  .employeeAddGrid button{
-    width:100% !important;
-    min-height:44px !important;
-    border-radius:14px !important;
-    font-size:15px !important;
-  }
-
-  .employeeTableWrap{
-    padding:0 !important;
-    background:transparent !important;
-    border:0 !important;
-    box-shadow:none !important;
-    overflow:visible !important;
+  .employeeTableWrap {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow: visible !important;
   }
 
   .employeeTable,
-  .employeeTable thead,
-  .employeeTable tbody,
-  .employeeTable tr,
-  .employeeTable td{
-    display:block !important;
-    width:100% !important;
+  .employeeTable tbody {
+    display: block !important;
+    width: 100% !important;
   }
 
-  .employeeTable thead{
-    display:none !important;
+  .employeeTable tr {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    padding: 14px !important;
+    margin: 0 0 12px 0 !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    column-gap: 10px !important;
+    row-gap: 8px !important;
   }
 
-  .employeeTable tr{
-    background:#fff !important;
-    border:1px solid #e5e7eb !important;
-    border-radius:18px !important;
-    box-shadow:0 2px 8px rgba(15,23,42,.04) !important;
-    padding:14px !important;
-    margin:0 0 12px !important;
+  .employeeTable td {
+    display: block !important;
+    width: 100% !important;
+    padding: 0 !important;
   }
 
-  .employeeTable td{
-    border:0 !important;
-    padding:7px 0 !important;
-    display:grid !important;
-    grid-template-columns:82px minmax(0,1fr) !important;
-    gap:10px !important;
-    align-items:center !important;
-    white-space:normal !important;
+  .employeeTable td::before {
+    display: block !important;
+    content: attr(data-label) !important;
+    color: #64748b !important;
+    font-size: 12px !important;
+    font-weight: 800 !important;
+    margin-bottom: 4px !important;
   }
 
-  .employeeTable td::before{
-    content:attr(data-label);
-    color:#64748b;
-    font-size:13px;
-    font-weight:900;
+  .employeeTable .employeeNameCell {
+    grid-column: 1 / -1 !important;
+    font-size: 22px !important;
+    padding-bottom: 8px !important;
+    margin-bottom: 4px !important;
   }
 
-  .employeeTable .employeeNameCell{
-    display:block !important;
-    font-size:20px !important;
-    font-weight:900 !important;
-    padding-bottom:10px !important;
-    border-bottom:1px solid #f1f5f9 !important;
-    margin-bottom:4px !important;
-  }
-  .employeeTable .employeeNameCell::before{
-    content:none !important;
+  .employeeTable .employeeNameCell::before {
+    display: none !important;
   }
 
-  .employeeTable select,
-  .employeeTable input,
-  .employeeTable button{
-    width:100% !important;
-    min-width:0 !important;
-    min-height:40px !important;
-    border-radius:12px !important;
-    font-size:14px !important;
+  .employeeTable td[data-label="비밀번호"] {
+    grid-column: 1 / -1 !important;
   }
 
-  .employeeTable .passwordEdit{
-    display:grid !important;
-    grid-template-columns:1fr !important;
-    gap:8px !important;
+  .employeeTable .passwordEdit {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
   }
 
   .employeeTable td[data-label="상세"],
   .employeeTable td[data-label="검수매장"],
-  .employeeTable td[data-label="저장"]{
-    grid-template-columns:1fr !important;
-  }
-  .employeeTable td[data-label="상세"]::before,
-  .employeeTable td[data-label="검수매장"]::before,
-  .employeeTable td[data-label="저장"]::before{
-    content:none !important;
+  .employeeTable td[data-label="저장"] {
+    grid-column: auto !important;
   }
 
-  .employeeAssignToggle{
-    width:76px !important;
-    justify-self:start !important;
+  .employeeTable select,
+  .employeeTable input,
+  .employeeTable button {
+    min-height: 38px !important;
+    height: 38px !important;
+    font-size: 14px !important;
+    border-radius: 10px !important;
+  }
+
+  .employeeAssignToggle {
+    min-width: 96px !important;
+    width: auto !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    font-size: 13px !important;
+    padding: 0 10px !important;
+    border-radius: 999px !important;
+  }
+
+  .employeeAssignToggle.on::before {
+    content: "해피콜 ";
+    font-weight: 700;
+  }
+  .employeeAssignToggle.off::before {
+    content: "해피콜 ";
+    font-weight: 700;
+  }
+}
+
+/* 오류보고/건의문의/기타 관리자 테이블: 모바일에서 카드형 강제 */
+@media(max-width:768px){
+  .errorReportsTable,
+  .suggestionTable,
+  .adminTable,
+  .logTable {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .errorReportsTable thead,
+  .suggestionTable thead,
+  .adminTable thead,
+  .logTable thead {
+    display: none !important;
+  }
+
+  .errorReportsTable tbody,
+  .suggestionTable tbody,
+  .adminTable tbody,
+  .logTable tbody {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  .errorReportsTable tr,
+  .suggestionTable tr,
+  .adminTable tr,
+  .logTable tr {
+    display: block !important;
+    background: #fff !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 16px !important;
+    padding: 14px !important;
+    margin: 0 0 12px 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .errorReportsTable td,
+  .suggestionTable td,
+  .adminTable td,
+  .logTable td {
+    display: grid !important;
+    grid-template-columns: 84px minmax(0, 1fr) !important;
+    gap: 10px !important;
+    align-items: start !important;
+    border: 0 !important;
+    padding: 6px 0 !important;
+    white-space: normal !important;
+    word-break: keep-all !important;
+    overflow-wrap: anywhere !important;
+    writing-mode: horizontal-tb !important;
+    min-width: 0 !important;
+  }
+
+  .errorReportsTable td::before,
+  .suggestionTable td::before,
+  .adminTable td::before,
+  .logTable td::before {
+    content: attr(data-label);
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .errorReportsTable td:first-child,
+  .suggestionTable td:first-child,
+  .adminTable td:first-child,
+  .logTable td:first-child {
+    font-weight: 900 !important;
+  }
+}
+
+/* data-label이 없는 기존 테이블도 최소한 세로 글자 깨짐 방지 */
+@media(max-width:768px){
+  table:not(.employeeTable) td,
+  table:not(.employeeTable) th {
+    writing-mode: horizontal-tb !important;
+    word-break: keep-all !important;
+    overflow-wrap: anywhere !important;
+    white-space: normal !important;
+    min-width: 72px !important;
+    max-width: 220px !important;
+    padding: 9px 10px !important;
+    font-size: 13px !important;
+    line-height: 1.35 !important;
+  }
+
+  table:not(.employeeTable) {
+    width: max-content !important;
+    min-width: 100% !important;
+  }
+
+  .sectionCard:has(table:not(.employeeTable)) {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+}
+
+/* 악세사리/프리패스 탭 버튼 축소 */
+@media(max-width:768px){
+  .accessoryTabs.v287,
+  .accessoryMainTabs,
+  .freepassModule .filterBar,
+  .filterBar {
+    gap: 8px !important;
+  }
+
+  .accessoryTabs.v287 button,
+  .accessoryMainTabs button,
+  .freepassModule .filterBar button {
+    min-height: 38px !important;
+    padding: 0 10px !important;
+    font-size: 13px !important;
+    border-radius: 12px !important;
+  }
+
+  .accessoryActions.compact button,
+  .accessoryActions.compact select {
+    min-height: 38px !important;
+    font-size: 13px !important;
   }
 }

@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v29.0-20260623015622';
+const APP_BUILD_VERSION = 'v29.1-20260623023106';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -111,7 +111,25 @@ class ErrorBoundary extends Component {
 }
 
 
+
+function applyMobileTableLabels() {
+  try {
+    const tables = document.querySelectorAll('table');
+    tables.forEach(table => {
+      const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
+      if (!headers.length) return;
+      table.querySelectorAll('tbody tr').forEach(tr => {
+        Array.from(tr.children).forEach((td, idx) => {
+          if (!td.getAttribute('data-label') && headers[idx]) td.setAttribute('data-label', headers[idx]);
+        });
+      });
+    });
+  } catch (e) {}
+}
+
 function App() {
+  useEffect(() => { applyMobileTableLabels(); });
+
   const [user, setUser] = useState(() => {
     const saved = localStorage.getItem('happycall_user');
     return saved ? JSON.parse(saved) : null;
@@ -1955,7 +1973,6 @@ function HomeDashboard({ user, setTab }) {
   const [finalPending,setFinalPending]=useState(0);
   const [suggestions,setSuggestions]=useState(0);
   const [errors,setErrors]=useState(0);
-  const [accessoryCount,setAccessoryCount]=useState(0);
 
   useEffect(()=>{ load(); },[]);
 
@@ -1984,21 +2001,12 @@ function HomeDashboard({ user, setTab }) {
         setFinalPending((fp2||[]).length);
       }
 
-      const {data:sg}=await supabase.from('suggestions').select('id,status,requester_name');
-      const visibleSuggestions = isAdminLike(user) ? (sg||[]) : (sg||[]).filter(r => r.requester_name === user.name);
-      setSuggestions(visibleSuggestions.filter(r=>!['완료','종료','반려'].includes(r.status)).length);
-
-      const {data:acc}=await supabase.from('accessory_orders').select('id,employee_name,store_name,order_completed,store_arrived,customer_received,is_returned');
-      const accVisible = isAdminLike(user) ? (acc||[]) : (user.role === '점장' ? (acc||[]).filter(r=>r.store_name===user.store_name) : (acc||[]).filter(r=>r.employee_name===user.name));
-      setAccessoryCount(accVisible.filter(r=>!r.customer_received && !r.is_returned).length);
+      const {data:sg}=await supabase.from('suggestions').select('id,status');
+      setSuggestions((sg||[]).filter(r=>!['완료','종료'].includes(r.status)).length);
 
       if(isAdminLike(user)){
         const {data:er}=await supabase.from('error_reports').select('id,status');
-        setErrors((er||[]).filter(r=>{
-          const st = String(r.status || '').trim();
-          const doneWords = ['완료','해결','해결완료','처리완료','조치완료','종결','닫힘','closed','done'];
-          return !doneWords.some(w => st.toLowerCase().includes(String(w).toLowerCase()));
-        }).length);
+        setErrors((er||[]).filter(r=>!['완료','해결'].includes(r.status)).length);
       }
     }catch(e){
       console.warn('dashboard load failed', e);
@@ -2009,7 +2017,7 @@ function HomeDashboard({ user, setTab }) {
     {title:'내 해피콜', value:happyCount, desc:'진행 필요', tab:'mycalls', show:true},
     {title:'해피콜 검수', value:reviewCount, desc:'확인 필요', tab:'review', show:isAdminLike(user)},
     {title:'내 프리패스', value:freepassMine, desc:'진행 중 신청', tab:'freepass', show:true},
-    {title:'악세사리 주문', value:accessoryCount, desc:'주문 관리', tab:'accessories', show:true},
+    {title:'악세사리 주문', value:0, desc:'주문 관리', tab:'accessories', show:true},
     {title:'점장 승인', value:managerPending, desc:'승인 대기', tab:'freepass', show:user.role==='점장'||isAdminLike(user)},
     {title:'최종 승인', value:finalPending, desc:'최고관리자 확인', tab:'freepass', show:isSuperAdmin(user)},
     {title:'건의/문의', value:suggestions, desc:'진행 중', tab:'suggestions', show:true},
@@ -3178,12 +3186,11 @@ function ReviewStorePermissionsModal({ employee, stores, user, onClose }) {
 function Employees({ user }) {
   const [rows, setRows] = useState([]);
   const [storeOptions, setStoreOptions] = useState([]);
-  const [form, setForm] = useState({ name:'', store_name:'금촌', status:'재직', password:'1234', role:'직원', hire_date:'', resign_date:'', happycall_enabled:true });
+  const [form, setForm] = useState({ name:'', store_name:'금촌', status:'재직', password:'1234', role:'직원', hire_date:'', resign_date:'' });
   const [viewStatus, setViewStatus] = useState('재직');
   const [drafts, setDrafts] = useState({});
   const [detailTarget, setDetailTarget] = useState(null);
   const [reviewStoreTarget, setReviewStoreTarget] = useState(null);
-  const [showEmployeeAdd, setShowEmployeeAdd] = useState(false);
 
   useEffect(() => { load(); }, []);
 
@@ -3206,8 +3213,7 @@ function Employees({ user }) {
         store_name: r.store_name || '',
         status: r.status || '재직',
         role: r.role || '직원',
-        password: r.password || '',
-        happycall_enabled: r.happycall_enabled !== false
+        password: r.password || ''
       };
     });
     setDrafts(nextDrafts);
@@ -3231,7 +3237,6 @@ function Employees({ user }) {
       status: form.status,
       password: form.password || '1234',
       role: form.role,
-      happycall_enabled: form.happycall_enabled !== false,
       hire_date: form.hire_date || null,
       resign_date: form.status === '퇴사' ? (form.resign_date || null) : null
     };
@@ -3240,7 +3245,7 @@ function Employees({ user }) {
     if (error) return alert(error.message);
 
     await writeAuditLog('직원추가', 'employee', form.name, user, `${form.name} / ${form.store_name} / ${form.role}`);
-    setForm({ name:'', store_name: storeOptions[0]?.name || '금촌', status:'재직', password:'1234', role:'직원', hire_date:'', resign_date:'', happycall_enabled:true });
+    setForm({ name:'', store_name: storeOptions[0]?.name || '금촌', status:'재직', password:'1234', role:'직원', hire_date:'', resign_date:'' });
     load();
   }
 
@@ -3260,8 +3265,7 @@ function Employees({ user }) {
     const patch = {
       store_name: d.store_name || employee.store_name || '',
       status: d.status || employee.status || '재직',
-      role: d.role || employee.role || '직원',
-      happycall_enabled: d.happycall_enabled !== false
+      role: d.role || employee.role || '직원'
     };
 
     if (d.password && d.password !== employee.password) patch.password = d.password;
@@ -3298,16 +3302,12 @@ function Employees({ user }) {
     <div>
       <h2>직원관리</h2>
 
-      <div className="employeeMobileToolbar">
-        <button className="primary" onClick={()=>setShowEmployeeAdd(v=>!v)}>{showEmployeeAdd ? '직원 추가 닫기' : '+ 직원 추가'}</button>
-      </div>
-
-      <div className="filterBar employeeStatusTabs">
+      <div className="filterBar">
         <button className={viewStatus==='재직'?'active':''} onClick={()=>setViewStatus('재직')}>재직중 {activeCount}</button>
         <button className={viewStatus==='퇴사'?'active':''} onClick={()=>setViewStatus('퇴사')}>퇴사자 {retiredCount}</button>
       </div>
 
-      {showEmployeeAdd && <div className="sectionCard formGrid employeeAddGrid">
+      <div className="formGrid employeeAddGrid">
         <input placeholder="직원명" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
         {storeSelect(form.store_name, v => setForm({...form,store_name:v}))}
         <select value={form.status} onChange={e=>setForm({...form,status:e.target.value})}>
@@ -3321,13 +3321,9 @@ function Employees({ user }) {
           <option>검수자</option>
           <option>관리자</option><option>최고관리자</option>
         </select>
-        <select value={form.happycall_enabled ? 'ON' : 'OFF'} onChange={e=>setForm({...form,happycall_enabled:e.target.value==='ON'})}>
-          <option value="ON">해피콜 배정 ON</option>
-          <option value="OFF">해피콜 배정 OFF</option>
-        </select>
         <input placeholder="초기 비밀번호" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} />
         <button className="primary" onClick={add}>직원 추가</button>
-      </div>}
+      </div>
 
       <div className="sectionCard employeeTableWrap">
         <table className="employeeTable compactEmployeeTable">
@@ -3337,7 +3333,6 @@ function Employees({ user }) {
               <th>매장</th>
               <th>상태</th>
               <th>권한</th>
-              <th>해피콜 배정</th>
               <th>비밀번호 관리</th>
               <th>상세</th>
               <th>검수매장</th>
@@ -3349,16 +3344,16 @@ function Employees({ user }) {
               const d = drafts[r.id] || {};
               return (
                 <tr key={r.id}>
-                  <td className="employeeNameCell" data-label="이름">{r.name}</td>
-                  <td data-label="매장">{storeSelect(d.store_name ?? r.store_name, v => setDraft(r.id,{store_name:v}))}</td>
-                  <td data-label="상태">
+                  <td className="employeeNameCell">{r.name}</td>
+                  <td>{storeSelect(d.store_name ?? r.store_name, v => setDraft(r.id,{store_name:v}))}</td>
+                  <td>
                     <select value={d.status ?? r.status ?? '재직'} onChange={e=>setDraft(r.id,{status:e.target.value})}>
                       <option>재직</option>
                       <option>퇴사</option>
                       <option>리스트 제외</option>
                     </select>
                   </td>
-                  <td data-label="권한">
+                  <td>
                     <select value={d.role ?? r.role ?? '직원'} onChange={e=>setDraft(r.id,{role:e.target.value})}>
                       <option>직원</option>
                       <option>점장</option>
@@ -3366,24 +3361,15 @@ function Employees({ user }) {
                       <option>관리자</option><option>최고관리자</option>
                     </select>
                   </td>
-                  <td data-label="해피콜 배정">
-                    <button
-                      type="button"
-                      className={`employeeAssignToggle ${(d.happycall_enabled ?? r.happycall_enabled ?? true) !== false ? 'on' : 'off'}`}
-                      onClick={()=>setDraft(r.id,{happycall_enabled: !((d.happycall_enabled ?? r.happycall_enabled ?? true) !== false)})}
-                    >
-                      {(d.happycall_enabled ?? r.happycall_enabled ?? true) !== false ? 'ON' : 'OFF'}
-                    </button>
-                  </td>
-                  <td data-label="비밀번호">
+                  <td>
                     <div className="passwordEdit">
                       <input value={d.password ?? r.password ?? ''} onChange={e=>setDraft(r.id,{password:e.target.value})} placeholder="비밀번호" disabled={r.status === '퇴사'} />
                       <button onClick={() => resetPassword(r)} disabled={r.status === '퇴사'}>비밀번호 초기화</button>
                     </div>
                   </td>
-                  <td data-label="상세"><button onClick={()=>setDetailTarget(r)}>상세</button></td>
-                  <td data-label="검수매장">{(d.role ?? r.role) === '검수자' || (d.role ?? r.role) === '관리자' ? <button onClick={()=>setReviewStoreTarget(r)}>설정</button> : <span className="muted">-</span>}</td>
-                  <td data-label="저장"><button className="primary" onClick={()=>saveEmployee(r)}>저장</button></td>
+                  <td><button onClick={()=>setDetailTarget(r)}>상세</button></td>
+                  <td>{(d.role ?? r.role) === '검수자' || (d.role ?? r.role) === '관리자' ? <button onClick={()=>setReviewStoreTarget(r)}>설정</button> : <span className="muted">-</span>}</td>
+                  <td><button className="primary" onClick={()=>saveEmployee(r)}>최종저장</button></td>
                 </tr>
               );
             })}
@@ -3664,7 +3650,7 @@ function SuggestionsPage({ user }) {
     try {
       const data = await fetchAllRows('suggestions', '*', 'created_at');
       let list = data || [];
-      if (!isAdminLike(user)) {
+      if (user.role !== '관리자') {
         list = list.filter(r => r.requester_name === user.name);
       }
       setRows(list.sort((a,b)=>String(b.created_at || '').localeCompare(String(a.created_at || ''))));
@@ -3726,9 +3712,9 @@ function SuggestionsPage({ user }) {
 
   return (
     <div>
-      <h2>{isAdminLike(user) ? '건의/문의 관리' : '건의/문의 사항'}</h2>
+      <h2>{user.role === '관리자' ? '건의/문의 관리' : '건의/문의 사항'}</h2>
 
-      {!isAdminLike(user) && (
+      {user.role !== '관리자' && (
         <div className="sectionCard suggestionWriteBox">
           <select value={category} onChange={e=>setCategory(e.target.value)}>
             <option>기능추가</option>
@@ -3772,7 +3758,7 @@ function SuggestionsPage({ user }) {
             {filtered.map(r => (
               <tr key={r.id} className={user.role === '관리자' ? 'clickableRow' : ''} onClick={() => user.role === '관리자' && setSelected(r)}>
                 <td>{formatKST(r.created_at)}</td>
-                {isAdminLike(user) && <td>{r.requester_name}</td>}
+                {user.role === '관리자' && <td>{r.requester_name}</td>}
                 {user.role === '관리자' && <td>{r.requester_store} / {r.requester_role}</td>}
                 <td>{r.category}</td>
                 <td className="suggestionContentCell">
@@ -4895,7 +4881,7 @@ function resolveAssigneeV8Compact(customer, customers, employees, stores, histor
     return String(v || '').trim();
   };
 
-  const isActive = e => e && e.status === '재직' && e.store_name !== '관리자' && e.happycall_enabled !== false;
+  const isActive = e => e && e.status === '재직' && e.store_name !== '관리자';
   const findEmp = name => (employees || []).find(e => normName(e.name) === normName(name));
 
   const baseStore = normStore(customer.store_name || customer.raw_store_name);
@@ -5247,7 +5233,7 @@ function TargetGenerator({ user }) {
         fetchAllRows('refused_customers', '*', 'refused_at')
       ]);
 
-      const activeEmployees = (employees || []).filter(e => e.status === '재직' && e.store_name !== '관리자' && e.happycall_enabled !== false && e.happycall_enabled !== false);
+      const activeEmployees = (employees || []).filter(e => e.status === '재직' && e.store_name !== '관리자');
       const staffByStore = {};
       activeEmployees.forEach(e => {
         const st = normalizeStore(e.store_name);
