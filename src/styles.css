@@ -4629,3 +4629,97 @@ body{
     font-size: 13px !important;
   }
 }
+
+/* V29.4 통합: 프리패스 동의/메뉴 중복 제거/악세사리 상태변경 팝업 */
+.quickActionGrid,
+.mobileBottomNav{
+  display:none !important;
+}
+
+.freepassConsentNotice,
+.freepassConsentRecord{
+  border:1px solid #dbeafe;
+  background:#eff6ff;
+  color:#1e3a8a;
+  border-radius:14px;
+  padding:14px;
+  margin:10px 0 14px;
+  line-height:1.45;
+}
+.freepassConsentNotice p,
+.freepassConsentRecord p{
+  margin:6px 0 0;
+  white-space:pre-line;
+}
+
+.accessoryStatusModal{
+  max-width:520px;
+}
+.accessoryStatusSummary{
+  border:1px solid #e5e7eb;
+  border-radius:16px;
+  padding:14px;
+  margin:8px 0 14px;
+  background:#f8fafc;
+}
+.accessoryStatusSummary strong{
+  font-size:20px;
+  display:block;
+}
+.accessoryStatusSummary p{
+  margin:4px 0 10px;
+  color:#64748b;
+}
+.statusModalLabel{
+  display:block;
+  font-weight:900;
+  color:#0f172a;
+  margin:12px 0;
+}
+.statusModalLabel select,
+.statusModalLabel input{
+  margin-top:8px;
+  width:100%;
+}
+.statusModalReturnBox textarea{
+  width:100%;
+  min-height:92px;
+  border:1px solid #e5e7eb;
+  border-radius:14px;
+  padding:12px;
+  font-size:15px;
+  box-sizing:border-box;
+}
+.modalActionRow{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-top:16px;
+}
+@media(max-width:768px){
+  .freepassConsentNotice,
+  .freepassConsentRecord{
+    padding:12px !important;
+    font-size:13px !important;
+    border-radius:13px !important;
+  }
+  .topNav.compactNav{
+    grid-template-columns:repeat(3, minmax(0,1fr)) !important;
+    gap:8px !important;
+  }
+  .topNav.compactNav > button,
+  .topNav.compactNav .compactHead{
+    min-height:38px !important;
+    font-size:13px !important;
+    border-radius:12px !important;
+  }
+  .accessoryStatusModal{
+    width:calc(100vw - 28px) !important;
+    max-height:calc(100vh - 80px) !important;
+    overflow:auto !important;
+    padding:16px !important;
+  }
+  .modalActionRow button{
+    min-height:42px !important;
+  }
+}

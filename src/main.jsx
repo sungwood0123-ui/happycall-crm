@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v29.1-20260623023106';
+const APP_BUILD_VERSION = 'v29.4-20260624110431';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -788,6 +788,27 @@ function AutoLogoutGuard({ onLogout }) {
 }
 
 
+
+const FREEPASS_CONSENT_TEXT = `본 신청은 회사의 강제 지시, 명령 또는 사전 승인에 따른 연장근로·휴일근로 신청이 아닙니다.
+
+본인은 개인의 고객관리, 판매활동, 사후응대 등 필요에 따라 자발적으로 고객 응대 또는 관련 업무를 수행하였으며, 이에 대한 프리패스 적립은 회사의 복지제도 운영에 따른 보상임을 확인합니다.
+
+본 신청은 연장근로수당, 휴일근로수당 또는 임금 지급을 청구하기 위한 신청이 아니며, 회사가 업무시간 외 근무를 지시·요구·강제한 것으로 해석되지 않음을 확인하고 동의합니다.`;
+
+function freepassConsentSnapshot(user, requestType, earnType) {
+  return {
+    agreed: true,
+    agreed_at: new Date().toISOString(),
+    agreed_by: user?.name || '',
+    agreed_role: user?.role || '',
+    agreed_store: user?.store_name || '',
+    request_type: requestType || '',
+    earn_type: earnType || '',
+    consent_text: FREEPASS_CONSENT_TEXT,
+    consent_version: 'freepass-welfare-v1'
+  };
+}
+
 function FreepassModule({ user }) {
   const [tab, setTab] = useState('내 프리패스');
   const tabs = ['내 프리패스', '사용 신청', '적립 요청'];
@@ -1041,7 +1062,7 @@ function FreepassRequestForm({ user }) {
 
 
 function AccrualRequestTab({ user }) {
-  const [mode,setMode]=useState('야근 적립');
+  const [mode,setMode]=useState('고객 추가 응대');
   const [rows,setRows]=useState([]);
   const [nightDate,setNightDate]=useState(todayLocalISO());
   const [nightHours,setNightHours]=useState(1);
@@ -1055,14 +1076,28 @@ function AccrualRequestTab({ user }) {
 
   useEffect(()=>{ load(); },[]);
 
+  function normalizeAccrualType(v){
+    if (v === '야근 적립') return '고객 추가 응대';
+    if (v === '휴무출근 적립' || v === '휴무 출근 적립') return '휴무 고객응대';
+    return v || '';
+  }
+
   async function load(){
     const {data}=await supabase
       .from('freepass_requests')
       .select('*')
       .eq('employee_name', user.name)
-      .in('request_type', ['야근 적립','휴무출근 적립'])
+      .in('request_type', ['고객 추가 응대','휴무 고객응대','야근 적립','휴무출근 적립'])
       .order('requested_at', { ascending:false });
     setRows(data||[]);
+  }
+
+  function confirmConsent(requestType){
+    const ok = confirm(`${FREEPASS_CONSENT_TEXT}
+
+위 내용을 확인하고 동의해야 프리패스 적립 요청이 접수됩니다.`);
+    if(!ok) return null;
+    return freepassConsentSnapshot(user, '적립 요청', requestType);
   }
 
   async function capturePhoto(file, setter, label){
@@ -1078,7 +1113,7 @@ function AccrualRequestTab({ user }) {
     const capturedAt = new Date().toISOString();
     const reader = new FileReader();
     reader.onload = () => {
-      const item = { type:'야근', data:String(reader.result||''), captured_at:capturedAt };
+      const item = { type:'고객 추가 응대', data:String(reader.result||''), captured_at:capturedAt };
       setPhotoItems([item]);
       setNightDate(dateFromCapturedAt(item));
     };
@@ -1087,121 +1122,138 @@ function AccrualRequestTab({ user }) {
 
   async function submitNight(){
     if(!photoItems.length) return alert('사진 촬영 후 적립 요청이 가능합니다.');
-    if(!reason.trim()) return alert('사유를 입력해주세요.');
+    if(!reason.trim()) return alert('고객 응대 내용을 입력해주세요.');
+    const consent = confirmConsent('고객 추가 응대');
+    if(!consent) return;
     setBusy(true);
     try{
       const requestDate = dateFromCapturedAt(photoItems[0], nightDate);
       const {error}=await supabase.from('freepass_requests').insert({
         employee_id:user.id, employee_name:user.name, employee_store:user.store_name,
-        request_type:'야근 적립', use_type:null, request_date:requestDate, hours:Number(nightHours), reason,
+        request_type:'고객 추가 응대', use_type:null, request_date:requestDate, hours:Number(nightHours), reason,
         evidence_photo_data:JSON.stringify(photoItems),
+        consent_agreed:true,
+        consent_agreed_at:consent.agreed_at,
+        consent_text:consent.consent_text,
+        consent_snapshot:consent,
         status:'최종승인대기', manager_status:'점장승인생략', final_status:'대기',
         requested_at:new Date().toISOString(), manager_approved_by:user.name, manager_approved_at:new Date().toISOString()
       });
       if(error) throw error;
-      await writeAuditLog('야근적립신청','freepass_requests',user.name,user,`${requestDate} / ${nightHours}시간 / ${reason}`);
-      alert('적립 요청이 접수되었습니다.');
+      await writeAuditLog('고객추가응대적립신청','freepass_requests',user.name,user,`${requestDate} / ${nightHours}시간 / ${reason} / 동의완료`);
+      alert('프리패스 적립 요청이 접수되었습니다.');
       setReason(''); setPhotoItems([]); setNightHours(1); setNightDate(todayLocalISO()); load();
-    }catch(e){ askErrorReport({user,currentTab:'프리패스 적립 요청',actionName:'야근 적립 신청',error:e}); }
+    }catch(e){ askErrorReport({user,currentTab:'프리패스 적립 요청',actionName:'고객 추가 응대 신청',error:e}); }
     finally{ setBusy(false); }
   }
 
   async function saveStartDraft(){
-    if(!startPhoto) return alert('출근 사진을 촬영해주세요.');
-    if(!reason.trim()) return alert('사유를 입력해주세요.');
+    if(!startPhoto) return alert('응대 시작 사진을 촬영해주세요.');
+    if(!reason.trim()) return alert('고객 응대 내용을 입력해주세요.');
     const requestDate = dateFromCapturedAt(startPhoto);
     setBusy(true);
     try{
       const {error}=await supabase.from('freepass_requests').insert({
         employee_id:user.id, employee_name:user.name, employee_store:user.store_name,
-        request_type:'휴무출근 적립', use_type:null, request_date:requestDate, hours:0, reason,
+        request_type:'휴무 고객응대', use_type:null, request_date:requestDate, hours:0, reason,
         evidence_photo_data:buildEvidencePhotos({startPhoto}),
         status:'임시저장', manager_status:'점장승인생략', final_status:'대기',
         requested_at:new Date().toISOString(), manager_approved_by:user.name, manager_approved_at:new Date().toISOString()
       });
       if(error) throw error;
-      await writeAuditLog('휴무출근출근사진임시저장','freepass_requests',user.name,user,`${requestDate} / ${reason}`);
-      alert('출근 사진이 임시저장되었습니다. 퇴근 시 신청현황에서 해당 건을 눌러 퇴근 사진과 적립 시간을 입력해주세요.');
+      await writeAuditLog('휴무고객응대시작사진임시저장','freepass_requests',user.name,user,`${requestDate} / ${reason}`);
+      alert('응대 시작 사진이 임시저장되었습니다. 종료 시 신청현황에서 해당 건을 눌러 종료 사진과 적립 시간을 입력해주세요.');
       setStartPhoto(null); setReason(''); load();
-    }catch(e){ askErrorReport({user,currentTab:'프리패스 적립 요청',actionName:'출근 사진 임시저장',error:e}); }
+    }catch(e){ askErrorReport({user,currentTab:'프리패스 적립 요청',actionName:'휴무 고객응대 시작 사진 임시저장',error:e}); }
     finally{ setBusy(false); }
   }
 
   async function submitHolidayFinal(row){
-    if(!endPhoto) return alert('퇴근 사진을 촬영해주세요.');
+    if(!endPhoto) return alert('응대 종료 사진을 촬영해주세요.');
     if(!endHours || Number(endHours) <= 0) return alert('적립 시간을 선택해주세요.');
+    const consent = confirmConsent('휴무 고객응대');
+    if(!consent) return;
     const requestDate = dateFromCapturedAt(endPhoto, row.request_date);
     setBusy(true);
     try{
       const existing = parseEvidencePhotos(row.evidence_photo_data);
-      const photos = [...existing.filter(p => p.type !== '퇴근'), endPhoto];
+      const photos = [...existing.filter(p => p.type !== '응대 종료' && p.type !== '퇴근'), endPhoto];
       const {error}=await supabase.from('freepass_requests').update({
         evidence_photo_data:JSON.stringify(photos),
         status:'최종승인대기',
         final_status:'대기',
         request_date:requestDate,
-        hours:Number(endHours)
+        hours:Number(endHours),
+        consent_agreed:true,
+        consent_agreed_at:consent.agreed_at,
+        consent_text:consent.consent_text,
+        consent_snapshot:consent
       }).eq('id', row.id);
       if(error) throw error;
-      await writeAuditLog('휴무출근최종신청','freepass_requests',row.id,user,`${requestDate} / ${endHours}시간`);
-      alert('휴무출근 적립 요청이 접수되었습니다.');
+      await writeAuditLog('휴무고객응대최종신청','freepass_requests',row.id,user,`${requestDate} / ${endHours}시간 / 동의완료`);
+      alert('휴무 고객응대 적립 요청이 접수되었습니다.');
       setEndPhoto(null); setEndHours(1); setSelected(null); load();
-    }catch(e){ askErrorReport({user,currentTab:'프리패스 적립 요청',actionName:'퇴근 사진 최종저장',error:e}); }
+    }catch(e){ askErrorReport({user,currentTab:'프리패스 적립 요청',actionName:'휴무 고객응대 최종 저장',error:e}); }
     finally{ setBusy(false); }
   }
 
   return (
     <div>
       <div className="sectionCard accrualCard">
-        <h3>적립 요청</h3>
+        <h3>프리패스 적립 요청</h3>
+        <div className="freepassConsentNotice">
+          <b>안내</b>
+          <p>업무시간 외 고객응대 및 업무수행은 원칙적으로 금지됩니다. 프리패스 적립은 회사의 연장근로 지시 또는 휴일근로 지시에 따른 수당 신청이 아닌 복지제도 신청입니다.</p>
+        </div>
         <div className="filterBar moduleTabs">
-          <button className={mode==='야근 적립'?'active':''} onClick={()=>setMode('야근 적립')}>야근 적립</button>
-          <button className={mode==='휴무출근 적립'?'active':''} onClick={()=>setMode('휴무출근 적립')}>휴무출근 적립</button>
+          <button className={mode==='고객 추가 응대'?'active':''} onClick={()=>setMode('고객 추가 응대')}>고객 추가 응대</button>
+          <button className={mode==='휴무 고객응대'?'active':''} onClick={()=>setMode('휴무 고객응대')}>휴무 고객응대</button>
         </div>
 
-        {mode==='야근 적립' && <>
+        {mode==='고객 추가 응대' && <>
           <div className="formGrid compactFormGrid">
-            <label>적립 발생일<input type="date" value={nightDate} onChange={e=>setNightDate(e.target.value)} /></label>
-            <label>적립 시간<select value={nightHours} onChange={e=>setNightHours(Number(e.target.value))}><option value={1}>1시간</option><option value={2}>2시간</option><option value={3}>3시간</option></select></label>
+            <label>응대 발생일<input type="date" value={nightDate} onChange={e=>setNightDate(e.target.value)} /></label>
+            <label>복지 적립 시간<select value={nightHours} onChange={e=>setNightHours(Number(e.target.value))}><option value={1}>1시간</option><option value={2}>2시간</option><option value={3}>3시간</option></select></label>
           </div>
-          <textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="사유 입력" />
+          <textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="고객 응대 내용을 작성해주세요. 예) 퇴근 후 기존 고객 기기변경 상담, 인터넷 개통 고객 추가 응대" />
           <div className="photoCaptureBox">
             <label className="cameraButton">사진 촬영<input type="file" accept="image/*" capture="environment" onChange={e=>addNightPhoto(e.target.files?.[0])} /></label>
             <div className="evidenceGrid">
-              {photoItems.map((p,idx)=><div className="evidenceItem" key={idx}><img className="evidencePreview" src={p.data} alt="야근 증빙" /><p>촬영일시: {freepassPhotoTimeLabel(p.captured_at)}</p><button type="button" onClick={()=>setPhotoItems([])}>삭제/재촬영</button></div>)}
+              {photoItems.map((p,idx)=><div className="evidenceItem" key={idx}><img className="evidencePreview" src={p.data} alt="고객 추가 응대 증빙" /><p>촬영일시: {freepassPhotoTimeLabel(p.captured_at)}</p><button type="button" onClick={()=>setPhotoItems([])}>삭제/재촬영</button></div>)}
             </div>
-            <button className="primary" disabled={busy || !photoItems.length} onClick={submitNight}>{photoItems.length ? '적립 요청' : '사진 촬영 후 활성화'}</button>
+            <button className="primary" disabled={busy || !photoItems.length} onClick={submitNight}>{photoItems.length ? '동의 후 적립 요청' : '사진 촬영 후 활성화'}</button>
           </div>
         </>}
 
-        {mode==='휴무출근 적립' && <>
-          <textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="사유 입력" />
+        {mode==='휴무 고객응대' && <>
+          <textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="휴무 중 고객 응대 내용을 작성해주세요. 예) 휴무일 기존 고객 상담, 가족결합 안내, 긴급 개통 지원" />
           <div className="photoCaptureBox">
-            <p className="muted">1단계 출근 사진 임시저장 → 2단계 퇴근 사진 등록 시 적립 시간 선택 → 최종 승인 요청 순서로 진행됩니다.</p>
+            <p className="muted">1단계 응대 시작 사진 임시저장 → 2단계 응대 종료 사진 등록 시 적립 시간 선택 → 동의 후 최종 승인 요청 순서로 진행됩니다.</p>
             <div className="buttonRow">
-              <label className="cameraButton">출근 사진 촬영<input type="file" accept="image/*" capture="environment" onChange={e=>capturePhoto(e.target.files?.[0], setStartPhoto, '출근')} /></label>
+              <label className="cameraButton">응대 시작 사진 촬영<input type="file" accept="image/*" capture="environment" onChange={e=>capturePhoto(e.target.files?.[0], setStartPhoto, '응대 시작')} /></label>
               <button className="primary" disabled={busy || !startPhoto} onClick={saveStartDraft}>{startPhoto ? '1차 임시저장' : '촬영 후 임시저장 가능'}</button>
             </div>
-            {startPhoto && <div className="evidenceItem"><img className="evidencePreview" src={startPhoto.data} alt="출근 사진" /><p>촬영일시: {freepassPhotoTimeLabel(startPhoto.captured_at)}</p><button type="button" onClick={()=>setStartPhoto(null)}>삭제/재촬영</button></div>}
+            {startPhoto && <div className="evidenceItem"><img className="evidencePreview" src={startPhoto.data} alt="응대 시작 사진" /><p>촬영일시: {freepassPhotoTimeLabel(startPhoto.captured_at)}</p><button type="button" onClick={()=>setStartPhoto(null)}>삭제/재촬영</button></div>}
           </div>
         </>}
       </div>
 
       <div className="sectionCard">
         <h3>적립 요청 신청현황</h3>
-        <p className="muted">휴무출근 임시저장 건은 해당 행을 눌러 퇴근 사진과 적립 시간을 추가하면 최종 신청됩니다.</p>
+        <p className="muted">휴무 고객응대 임시저장 건은 해당 행을 눌러 응대 종료 사진과 적립 시간을 추가하면 최종 신청됩니다.</p>
         <table>
-          <thead><tr><th>접수 날짜·시각</th><th>유형</th><th>적립 발생일</th><th>시간</th><th>사유</th><th>상태</th></tr></thead>
+          <thead><tr><th>접수 날짜·시각</th><th>유형</th><th>응대 발생일</th><th>시간</th><th>내용</th><th>동의</th><th>상태</th></tr></thead>
           <tbody>
             {rows.map(r=><tr key={r.id} className="clickableRow" onClick={()=>setSelected(r)}>
               <td>{formatKST(r.requested_at || r.created_at)}</td>
-              <td>{r.request_type}</td>
+              <td>{normalizeAccrualType(r.request_type)}</td>
               <td>{r.request_date || '-'}</td>
               <td>{Number(r.hours||0) ? `${r.hours}시간` : '-'}</td>
               <td>{r.reason || '-'}</td>
+              <td>{r.consent_agreed ? '동의완료' : '-'}</td>
               <td><span className={`requestStatusBadge ${pushStatusClass(r.status)}`}>{pushStatusLabel(r.status)}</span></td>
             </tr>)}
-            {!rows.length && <tr><td colSpan="6" className="muted">적립 요청 내역이 없습니다.</td></tr>}
+            {!rows.length && <tr><td colSpan="7" className="muted">적립 요청 내역이 없습니다.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1210,31 +1262,31 @@ function AccrualRequestTab({ user }) {
         <div className="modalHead"><h2>적립 요청 상세</h2><button onClick={()=>{setSelected(null);setEndPhoto(null);setEndHours(1);}}>닫기</button></div>
         <section className="infoGrid">
           <p><b>접수 날짜·시각</b><br />{formatKST(selected.requested_at || selected.created_at)}</p>
-          <p><b>유형</b><br />{selected.request_type}</p>
-          <p><b>적립 발생일</b><br />{selected.request_date || '-'}</p>
+          <p><b>유형</b><br />{normalizeAccrualType(selected.request_type)}</p>
+          <p><b>응대 발생일</b><br />{selected.request_date || '-'}</p>
           <p><b>적립 시간</b><br />{Number(selected.hours||0) ? `${selected.hours}시간` : '-'}</p>
           <p><b>상태</b><br /><span className={`requestStatusBadge ${pushStatusClass(selected.status)}`}>{pushStatusLabel(selected.status)}</span></p>
-          <p><b>사유</b><br />{selected.reason || '-'}</p>
+          <p><b>고객 응대 내용</b><br />{selected.reason || '-'}</p>
+          <p><b>동의 여부</b><br />{selected.consent_agreed ? `동의완료 (${formatKST(selected.consent_agreed_at)})` : '-'}</p>
         </section>
+        {selected.consent_text && <div className="freepassConsentRecord"><b>동의 문구 기록</b><p>{selected.consent_text}</p></div>}
         <div className="evidenceGrid">
           {parseEvidencePhotos(selected.evidence_photo_data).map((p,idx)=><div className="evidenceItem" key={idx}><b>{p.type || `사진 ${idx+1}`}</b><img className="evidencePreview" src={p.data || p} alt={p.type || `증빙 ${idx+1}`} />{p.captured_at && <p>촬영일시: {freepassPhotoTimeLabel(p.captured_at)}</p>}</div>)}
         </div>
-        {selected.request_type==='휴무출근 적립' && selected.status === '임시저장' && <div className="photoCaptureBox">
+        {normalizeAccrualType(selected.request_type)==='휴무 고객응대' && selected.status === '임시저장' && <div className="photoCaptureBox">
           <div className="formGrid compactFormGrid">
             <label>적립 시간<select value={endHours} onChange={e=>setEndHours(Number(e.target.value))}><option value={1}>1시간</option><option value={2}>2시간</option><option value={3}>3시간</option></select></label>
           </div>
           <div className="buttonRow">
-            <label className="cameraButton">퇴근 사진 촬영<input type="file" accept="image/*" capture="environment" onChange={e=>capturePhoto(e.target.files?.[0], setEndPhoto, '퇴근')} /></label>
-            <button className="primary" disabled={busy || !endPhoto} onClick={()=>submitHolidayFinal(selected)}>{endPhoto ? '최종 저장 / 승인 요청' : '퇴근 사진 촬영 후 활성화'}</button>
+            <label className="cameraButton">응대 종료 사진 촬영<input type="file" accept="image/*" capture="environment" onChange={e=>capturePhoto(e.target.files?.[0], setEndPhoto, '응대 종료')} /></label>
+            <button className="primary" disabled={busy || !endPhoto} onClick={()=>submitHolidayFinal(selected)}>{endPhoto ? '동의 후 최종 요청' : '응대 종료 사진 촬영 후 활성화'}</button>
           </div>
-          {endPhoto && <div className="evidenceItem"><img className="evidencePreview" src={endPhoto.data} alt="퇴근 사진" /><p>촬영일시: {freepassPhotoTimeLabel(endPhoto.captured_at)}</p><button type="button" onClick={()=>setEndPhoto(null)}>삭제/재촬영</button></div>}
+          {endPhoto && <div className="evidenceItem"><img className="evidencePreview" src={endPhoto.data} alt="응대 종료 사진" /><p>촬영일시: {freepassPhotoTimeLabel(endPhoto.captured_at)}</p><button type="button" onClick={()=>setEndPhoto(null)}>삭제/재촬영</button></div>}
         </div>}
       </div></div>}
     </div>
   );
 }
-
-
 function FreepassApprovalQueue({ user, mode }) {
   const [rows,setRows]=useState([]); const [selected,setSelected]=useState(null);
   useEffect(()=>{load();},[mode]);
@@ -1688,6 +1740,8 @@ function AccessoryOrdersPage({ user }) {
   const [newOrder,setNewOrder]=useState({ customer_name:'', order_source:'개통', payment_type:'무료제공', customer_payment_amount:'', items:[emptyItem()] });
   const [editingId,setEditingId]=useState(null);
   const [busy,setBusy]=useState(false);
+  const [statusModal,setStatusModal]=useState(null);
+  const [statusDraft,setStatusDraft]=useState({next:'', expected_arrival_date:'', return_reason:'고객 변심', return_reason_extra:''});
 
   const isAdmin = isAdminLike(user);
   const canSeeAll = isAdmin;
@@ -1856,27 +1910,57 @@ function AccessoryOrdersPage({ user }) {
     }finally{ setBusy(false); }
   }
 
-  function handleStatusChange(row){
+  
+function statusOptionsFor(row){
     const current = accessoryStatusKey(row);
-    let options = [];
-    if(current === 'pending') options = ['주문 완료'];
-    if(current === 'completed') options = ['매장 도착','반품'];
-    if(current === 'arrived') options = ['고객 수령','반품'];
-    if(current === 'received') options = ['반품'];
+    if(current === 'pending') return ['주문 완료','반품'];
+    if(current === 'completed') return ['매장 도착','반품'];
+    if(current === 'arrived') return ['고객 수령','반품'];
+    if(current === 'received') return ['반품'];
+    return [];
+  }
+
+  function handleStatusChange(row){
+    const options = statusOptionsFor(row);
     if(!options.length) return alert('변경 가능한 상태가 없습니다.');
-    const choice = prompt(`변경할 상태를 입력해주세요.\n${options.join(' / ')}`);
-    if(!choice) return;
-    if(!options.includes(choice)) return alert('선택 가능한 상태만 입력해주세요.');
+    setStatusModal(row);
+    setStatusDraft({
+      next: options[0],
+      expected_arrival_date: row.expected_arrival_date || todayLocalISO(),
+      return_reason:'고객 변심',
+      return_reason_extra:''
+    });
+  }
+
+  function closeStatusModal(){
+    setStatusModal(null);
+    setStatusDraft({next:'', expected_arrival_date:'', return_reason:'고객 변심', return_reason_extra:''});
+  }
+
+  async function submitStatusModal(){
+    if(!statusModal) return;
+    const choice = statusDraft.next;
+    if(!choice) return alert('변경할 상태를 선택해주세요.');
+    const row = statusModal;
     if(choice === '주문 완료'){
-      const arrival = prompt('도착 예정일을 입력해주세요. 예: 2026-06-25');
-      if(!arrival) return;
-      return updateOrder(row,{order_completed:true, order_completed_at:new Date().toISOString(), expected_arrival_date:arrival},'악세사리주문완료',`도착 예정일 ${arrival}`);
+      if(!statusDraft.expected_arrival_date) return alert('도착 예정일을 선택해주세요.');
+      await updateOrder(row,{order_completed:true, order_completed_at:new Date().toISOString(), expected_arrival_date:statusDraft.expected_arrival_date},'악세사리주문완료',`도착 예정일 ${statusDraft.expected_arrival_date}`);
+      return closeStatusModal();
     }
-    if(choice === '매장 도착') return updateOrder(row,{store_arrived:true, store_arrived_at:new Date().toISOString()},'악세사리매장도착',row.customer_name_masked);
-    if(choice === '고객 수령') return updateOrder(row,{customer_received:true, customer_received_at:new Date().toISOString()},'악세사리고객수령',row.customer_name_masked);
+    if(choice === '매장 도착'){
+      await updateOrder(row,{store_arrived:true, store_arrived_at:new Date().toISOString()},'악세사리매장도착',row.customer_name_masked);
+      return closeStatusModal();
+    }
+    if(choice === '고객 수령'){
+      await updateOrder(row,{customer_received:true, customer_received_at:new Date().toISOString()},'악세사리고객수령',row.customer_name_masked);
+      return closeStatusModal();
+    }
     if(choice === '반품'){
-      const reason = prompt(`반품 사유를 입력해주세요.\n${returnReasons.join(' / ')}`, '고객 변심') || '기타';
-      return updateOrder(row,{is_returned:true, returned_at:new Date().toISOString(), return_reason:reason},'악세사리반품',reason);
+      const reason = statusDraft.return_reason === '기타'
+        ? (statusDraft.return_reason_extra.trim() || '기타')
+        : statusDraft.return_reason;
+      await updateOrder(row,{is_returned:true, returned_at:new Date().toISOString(), return_reason:reason},'악세사리반품',reason);
+      return closeStatusModal();
     }
   }
 
@@ -1962,6 +2046,43 @@ function AccessoryOrdersPage({ user }) {
           {!filtered.length && <p className="emptyAccessory">표시할 주문건이 없습니다.</p>}
         </div>
       </div>
+
+      {statusModal && <div className="modalBg">
+        <div className="modal accessoryStatusModal">
+          <div className="modalHead">
+            <h2>주문 상태 변경</h2>
+            <button type="button" onClick={closeStatusModal}>닫기</button>
+          </div>
+          <div className="accessoryStatusSummary">
+            <strong>{statusModal.order_code}</strong>
+            <p>{statusModal.customer_name_masked} · {normalizeAccessoryItems(statusModal)[0]?.model_name || statusModal.model_name || '-'}</p>
+            <span className={`accessoryBadge ${accessoryStatusKey(statusModal)}`}>현재 {accessoryOrderStatus(statusModal)}</span>
+          </div>
+          <label className="statusModalLabel">변경할 상태
+            <select value={statusDraft.next} onChange={e=>setStatusDraft(p=>({...p,next:e.target.value}))}>
+              {statusOptionsFor(statusModal).map(opt=><option key={opt}>{opt}</option>)}
+            </select>
+          </label>
+
+          {statusDraft.next === '주문 완료' && <label className="statusModalLabel">도착 예정일
+            <input type="date" value={statusDraft.expected_arrival_date} onChange={e=>setStatusDraft(p=>({...p,expected_arrival_date:e.target.value}))} />
+          </label>}
+
+          {statusDraft.next === '반품' && <div className="statusModalReturnBox">
+            <label className="statusModalLabel">반품 사유
+              <select value={statusDraft.return_reason} onChange={e=>setStatusDraft(p=>({...p,return_reason:e.target.value}))}>
+                {returnReasons.map(r=><option key={r}>{r}</option>)}
+              </select>
+            </label>
+            {statusDraft.return_reason === '기타' && <textarea value={statusDraft.return_reason_extra} onChange={e=>setStatusDraft(p=>({...p,return_reason_extra:e.target.value}))} placeholder="반품 사유를 입력해주세요." />}
+          </div>}
+
+          <div className="modalActionRow">
+            <button type="button" onClick={closeStatusModal}>취소</button>
+            <button type="button" className="primary" disabled={busy} onClick={submitStatusModal}>변경 저장</button>
+          </div>
+        </div>
+      </div>}
     </div>
   );
 }
@@ -2044,11 +2165,6 @@ function HomeDashboard({ user, setTab }) {
         ))}
       </div>
 
-      <div className="quickActionGrid">
-        <button onClick={()=>setTab('mycalls')}>해피콜 바로가기</button>
-        <button onClick={()=>setTab('freepass')}>프리패스 바로가기</button>
-        <button onClick={()=>setTab('suggestions')}>건의/문의</button>
-      </div>
     </div>
   );
 }
@@ -2114,24 +2230,7 @@ function MobileSideDrawer({ open, onClose, user, setTab, onLogout, onPassword })
   );
 }
 
-function MobileBottomNav({ tab, setTab, user }) {
-  const items = [
-    {key:'home', label:'홈'},
-    {key:'mycalls', label:'해피콜'},
-    {key:'freepass', label:'프리패스'},
-    {key:'suggestions', label:'건의'},
-    {key:'guide', label:'더보기'}
-  ];
-  return (
-    <nav className="mobileBottomNav" aria-label="모바일 하단 메뉴">
-      {items.map(item=>(
-        <button key={item.key} className={tab===item.key?'active':''} onClick={()=>setTab(item.key)}>
-          <span>{item.label}</span>
-        </button>
-      ))}
-    </nav>
-  );
-}
+function MobileBottomNav({ tab, setTab, user }) { return null; }
 
 function MainApp({ user, onLogout, onUserUpdate }) {
   const [tab, setTab] = useState('home');
@@ -2210,7 +2309,6 @@ function MainApp({ user, onLogout, onUserUpdate }) {
         {tab === 'freepass' && <FreepassModule user={user} />}
         {tab === 'accessories' && <AccessoryOrdersPage user={user} />}
         {tab === 'pushSettings' && <PushSettings user={user} />}
-        <MobileBottomNav tab={tab} setTab={setTab} user={user} />
         {tab === 'guide' && <UsageGuide user={user} />}
         {tab === 'manager' && <ManagerStoreDashboardV6 user={user} />}
         {tab === 'storecalls' && <CallList user={user} mode="store" readOnly={true} />}
