@@ -1432,7 +1432,7 @@ function FreepassApprovalQueue({ user, mode }) {
               <td>{r.reason}</td>
               <td>{r.status}</td>
             </tr>)}
-            {!rows.length&&<tr className="approvalEmptyRow"><td colSpan="7"><div className="approvalEmptyBox">승인 대기 건이 없습니다.</div></td></tr>}
+            {!rows.length&&<tr className="approvalEmptyRow"><td colSpan="7"><div className="approvalEmptyText">승인 대기 건이 없습니다.</div></td></tr>}
           </tbody>
         </table>
       </div>
@@ -1695,7 +1695,7 @@ function FreepassAdminAdjust({ user }) {
           <button type="button" onClick={()=>selectAllBulk(false)}>전체 해제</button>
         </div>
         <textarea value={bulkReason} onChange={e=>setBulkReason(e.target.value)} placeholder="일괄 처리 사유 입력" />
-        <table className="freepassBulkTable">
+        <table className="freepassBulkTable compactFreepassTable">
           <thead><tr><th>선택</th><th>매장</th><th>직원</th><th>권한</th><th>구분</th><th>시간</th></tr></thead>
           <tbody>
             {employees.map(emp=>{
@@ -1739,7 +1739,7 @@ function FreepassStoreOverview({ user }) {
     <div className="sectionCard freepassStoreOverviewCard">
       <h3>{isAdminLike(user) ? '매장 직원 프리패스 현황' : `${user.store_name} 프리패스 현황`}</h3>
       <p className="muted">직원을 누르면 적립/사용/차감/초기화 이력을 확인할 수 있습니다.</p>
-      <table className="freepassOverviewTable">
+      <table className="freepassOverviewTable compactFreepassTable">
         <thead>
           <tr><th>매장</th><th>직원</th><th>권한</th><th>잔여시간</th><th>이번달 사용</th></tr>
         </thead>
@@ -1803,23 +1803,32 @@ function FreepassSemiannualReset({ user }) {
   const [ledger,setLedger]=useState([]);
   const [employees,setEmployees]=useState([]);
   const [busy,setBusy]=useState(false);
+  const [exceptions,setExceptions]=useState({});
 
   useEffect(()=>{ load(); },[]);
   async function load(){
     const {data:l}=await supabase.from('freepass_ledger').select('*').order('created_at',{ascending:false});
     const {data:e}=await supabase.from('employees').select('*').eq('status','재직').order('store_name');
     setLedger(l||[]);
-    setEmployees(e||[]);
+    const sorted=sortEmployeesForLogin(e||[]);
+    setEmployees(sorted);
+    const init={}; sorted.forEach(emp=>{ init[emp.id||emp.name]=false; });
+    setExceptions(init);
   }
 
   const resetTargets = employees.map(emp => ({...emp, balance: freepassBalanceOf(ledger, emp.name)})).filter(emp => emp.balance > 0);
+  const activeTargets = resetTargets.filter(emp => !exceptions[emp.id||emp.name]);
+
+  function toggleException(key, checked){
+    setExceptions(prev=>({...prev,[key]:checked}));
+  }
 
   async function runReset(){
     if(!isSuperAdmin(user)) return alert('최고관리자만 실행할 수 있습니다.');
-    if(!confirm(`잔여 프리패스 ${resetTargets.length}명을 0으로 초기화합니다.\n마이너스 잔여시간은 유지됩니다.\n진행할까요?`)) return;
+    if(!confirm(`잔여 프리패스 ${activeTargets.length}명을 0으로 초기화합니다.\n예외 선택된 인원은 초기화하지 않습니다.\n마이너스 잔여시간은 유지됩니다.\n진행할까요?`)) return;
     setBusy(true);
     try{
-      const rows = resetTargets.map(emp => ({
+      const rows = activeTargets.map(emp => ({
         employee_id: emp.id || null,
         employee_name: emp.name,
         employee_store: emp.store_name,
@@ -1834,7 +1843,7 @@ function FreepassSemiannualReset({ user }) {
         const {error}=await supabase.from('freepass_ledger').insert(rows);
         if(error) throw error;
       }
-      await writeAuditLog('프리패스반기초기화','freepass_ledger','semiannual',user,`초기화 ${rows.length}명`);
+      await writeAuditLog('프리패스반기초기화','freepass_ledger','semiannual',user,`초기화 ${rows.length}명 / 예외 ${resetTargets.length-activeTargets.length}명`);
       alert('반기 초기화가 완료되었습니다.');
       load();
     }catch(e){
@@ -1845,19 +1854,27 @@ function FreepassSemiannualReset({ user }) {
   }
 
   return (
-    <div className="sectionCard">
+    <div className="sectionCard freepassSemiannualCard">
       <h3>6개월 잔여 프리패스 초기화</h3>
-      <p className="muted">잔여 프리패스만 0으로 초기화하고, 마이너스 잔여시간은 유지합니다.</p>
+      <p className="muted">잔여 프리패스만 0으로 초기화하고, 마이너스 잔여시간은 유지합니다. 예외 체크한 인원은 초기화하지 않습니다.</p>
       <button className="dangerBtn" disabled={busy} onClick={runReset}>잔여 프리패스 초기화 실행</button>
-      <table>
-        <thead><tr><th>매장</th><th>직원</th><th>현재 잔여</th><th>초기화 차감</th></tr></thead>
+      <table className="freepassResetTable compactFreepassTable">
+        <thead><tr><th>예외</th><th>매장</th><th>직원</th><th>현재 잔여</th><th>초기화 차감</th></tr></thead>
         <tbody>
-          {resetTargets.map(emp=>(
-            <tr key={emp.id || emp.name}>
-              <td>{emp.store_name}</td><td>{emp.name}</td><td>{emp.balance}시간</td><td>-{emp.balance}시간</td>
-            </tr>
-          ))}
-          {!resetTargets.length && <tr><td colSpan="4" className="muted">초기화 대상 잔여 프리패스이 없습니다.</td></tr>}
+          {resetTargets.map(emp=>{
+            const key=emp.id||emp.name;
+            const except=!!exceptions[key];
+            return (
+              <tr key={key}>
+                <td><input type="checkbox" checked={except} onChange={e=>toggleException(key,e.target.checked)} /></td>
+                <td>{emp.store_name}</td>
+                <td>{emp.name}</td>
+                <td>{emp.balance}시간</td>
+                <td>{except ? '예외' : `-${emp.balance}시간`}</td>
+              </tr>
+            );
+          })}
+          {!resetTargets.length && <tr><td colSpan="5" className="muted">초기화 대상 잔여 프리패스가 없습니다.</td></tr>}
         </tbody>
       </table>
     </div>
@@ -1880,7 +1897,7 @@ function FreepassOverview({ user }) {
     <div className="sectionCard">
       <h3>전체 프리패스 현황</h3>
       <p className="muted">매장 순서 기준으로 잔여 시간을 확인합니다. 잔여 프리패스은 6개월마다 초기화 대상이며, 마이너스는 유지됩니다.</p>
-      <table className="freepassOverviewTable">
+      <table className="freepassOverviewTable compactFreepassTable">
         <thead>
           <tr><th>매장</th><th>직원</th><th>권한</th><th>잔여시간</th><th>이번달 사용</th></tr>
         </thead>

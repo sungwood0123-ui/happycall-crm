@@ -4975,3 +4975,195 @@ body{
     min-width:680px !important;
   }
 }
+
+/* V29.7 프리패스 UI 원복/폭/팝업 보정 */
+/* 1) V29.6에서 변경된 직원현황 카드형을 원래 테이블폼으로 복구 */
+@media(max-width:768px){
+  .freepassStoreOverviewCard{
+    padding:16px !important;
+    overflow:hidden !important;
+  }
+  .freepassStoreOverviewCard .freepassOverviewTable,
+  .freepassStoreOverviewCard .freepassOverviewTable thead,
+  .freepassStoreOverviewCard .freepassOverviewTable tbody,
+  .freepassStoreOverviewCard .freepassOverviewTable tr,
+  .freepassStoreOverviewCard .freepassOverviewTable th,
+  .freepassStoreOverviewCard .freepassOverviewTable td{
+    display:revert !important;
+  }
+  .freepassStoreOverviewCard .freepassOverviewTable{
+    display:table !important;
+    table-layout:fixed !important;
+    width:100% !important;
+    min-width:0 !important;
+    border-collapse:collapse !important;
+  }
+  .freepassStoreOverviewCard .freepassOverviewTable th,
+  .freepassStoreOverviewCard .freepassOverviewTable td{
+    padding:8px 6px !important;
+    font-size:12px !important;
+    white-space:nowrap !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+    border-bottom:1px solid #e5e7eb !important;
+  }
+  .freepassStoreOverviewCard .freepassOverviewTable th:nth-child(1),
+  .freepassStoreOverviewCard .freepassOverviewTable td:nth-child(1){width:18% !important;}
+  .freepassStoreOverviewCard .freepassOverviewTable th:nth-child(2),
+  .freepassStoreOverviewCard .freepassOverviewTable td:nth-child(2){width:22% !important;}
+  .freepassStoreOverviewCard .freepassOverviewTable th:nth-child(3),
+  .freepassStoreOverviewCard .freepassOverviewTable td:nth-child(3){width:16% !important;}
+  .freepassStoreOverviewCard .freepassOverviewTable th:nth-child(4),
+  .freepassStoreOverviewCard .freepassOverviewTable td:nth-child(4){width:22% !important;}
+  .freepassStoreOverviewCard .freepassOverviewTable th:nth-child(5),
+  .freepassStoreOverviewCard .freepassOverviewTable td:nth-child(5){width:22% !important;}
+  .freepassStoreOverviewCard .freepassOverviewTable td:nth-child(5)::before{content:none !important;}
+  .freepassStoreOverviewCard .balanceBadge{
+    padding:5px 7px !important;
+    min-width:auto !important;
+    font-size:11px !important;
+  }
+}
+
+/* 2) 승인대기 빈 상태: 테이블 박스가 잘린 것처럼 보이지 않도록 */
+.approvalEmptyText{
+  padding:14px 12px !important;
+  color:#64748b !important;
+  text-align:left !important;
+  white-space:normal !important;
+}
+.approvalEmptyRow,
+.approvalEmptyRow td{
+  display:table-row !important;
+  width:auto !important;
+  border:0 !important;
+}
+.approvalEmptyRow td{
+  display:table-cell !important;
+  padding:0 !important;
+}
+
+/* 3) 프리패스 승인 팝업: 화면 중앙 고정 + 내부 스크롤 보장 */
+.freepassApprovalPanel .modalBg{
+  position:fixed !important;
+  inset:0 !important;
+  z-index:9999 !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  padding:12px !important;
+  overflow-y:auto !important;
+  -webkit-overflow-scrolling:touch !important;
+}
+.freepassApprovalModal{
+  position:relative !important;
+  width:min(860px, calc(100vw - 24px)) !important;
+  max-height:calc(100dvh - 32px) !important;
+  height:auto !important;
+  overflow:hidden !important;
+  display:flex !important;
+  flex-direction:column !important;
+  margin:auto !important;
+  border-radius:18px !important;
+}
+.freepassApprovalModal .modalHead{
+  flex:0 0 auto !important;
+}
+.freepassApprovalModalBody{
+  flex:1 1 auto !important;
+  min-height:0 !important;
+  overflow-y:auto !important;
+  -webkit-overflow-scrolling:touch !important;
+  padding-right:4px !important;
+}
+.stickyApprovalActions{
+  flex:0 0 auto !important;
+  position:static !important;
+  background:#fff !important;
+  padding-top:12px !important;
+}
+@media(max-width:768px){
+  .freepassApprovalModal{
+    width:calc(100vw - 24px) !important;
+    max-height:calc(100dvh - 34px) !important;
+    padding:14px !important;
+  }
+  .freepassApprovalModalBody{
+    max-height:none !important;
+    overflow-y:auto !important;
+  }
+  .freepassApprovalModal .infoGrid{
+    grid-template-columns:1fr 1fr !important;
+    gap:10px !important;
+  }
+  .stickyApprovalActions{
+    display:grid !important;
+    grid-template-columns:1fr 1fr !important;
+    gap:10px !important;
+  }
+}
+
+/* 4) 관리자 조정/반기초기화 테이블 열 폭 축소 */
+.freepassBulkTable,
+.freepassResetTable{
+  table-layout:fixed !important;
+  width:100% !important;
+  min-width:0 !important;
+}
+.freepassBulkTable th,
+.freepassBulkTable td,
+.freepassResetTable th,
+.freepassResetTable td{
+  padding:8px 6px !important;
+  white-space:nowrap !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+}
+.freepassBulkTable th:nth-child(1), .freepassBulkTable td:nth-child(1){width:10% !important;}
+.freepassBulkTable th:nth-child(2), .freepassBulkTable td:nth-child(2){width:16% !important;}
+.freepassBulkTable th:nth-child(3), .freepassBulkTable td:nth-child(3){width:18% !important;}
+.freepassBulkTable th:nth-child(4), .freepassBulkTable td:nth-child(4){width:14% !important;}
+.freepassBulkTable th:nth-child(5), .freepassBulkTable td:nth-child(5){width:20% !important;}
+.freepassBulkTable th:nth-child(6), .freepassBulkTable td:nth-child(6){width:22% !important;}
+.freepassBulkTable input[type="checkbox"],
+.freepassResetTable input[type="checkbox"]{
+  width:22px !important;
+  height:22px !important;
+  min-width:22px !important;
+  min-height:22px !important;
+}
+.freepassBulkTable select,
+.freepassBulkTable input[type="number"]{
+  width:100% !important;
+  min-width:0 !important;
+  height:38px !important;
+  font-size:13px !important;
+  padding:0 8px !important;
+}
+.freepassResetTable th:nth-child(1), .freepassResetTable td:nth-child(1){width:12% !important;}
+.freepassResetTable th:nth-child(2), .freepassResetTable td:nth-child(2){width:20% !important;}
+.freepassResetTable th:nth-child(3), .freepassResetTable td:nth-child(3){width:22% !important;}
+.freepassResetTable th:nth-child(4), .freepassResetTable td:nth-child(4){width:23% !important;}
+.freepassResetTable th:nth-child(5), .freepassResetTable td:nth-child(5){width:23% !important;}
+
+@media(max-width:768px){
+  .freepassBulkTable,
+  .freepassResetTable{
+    table-layout:fixed !important;
+    width:100% !important;
+    min-width:0 !important;
+  }
+  .freepassBulkTable th,
+  .freepassBulkTable td,
+  .freepassResetTable th,
+  .freepassResetTable td{
+    font-size:11px !important;
+    padding:7px 4px !important;
+  }
+  .freepassBulkTable select,
+  .freepassBulkTable input[type="number"]{
+    height:34px !important;
+    font-size:11px !important;
+    padding:0 4px !important;
+  }
+}
