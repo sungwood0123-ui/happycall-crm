@@ -5483,3 +5483,173 @@ table th,table td{padding:9px 8px !important;vertical-align:middle !important;li
     grid-template-columns:1fr 1fr !important;
   }
 }
+
+
+/* =========================================================
+   V29.12 해피콜 상세 팝업 터치 스크롤 강제 복구
+   증상: 스크롤바는 보이나 모바일 터치 스크롤이 먹지 않음.
+   조치: 해피콜 전용 body 영역에 고정 높이/터치 pan-y/overflow scroll 명확화.
+   ========================================================= */
+
+.happycallModalBg{
+  touch-action:none !important;
+  overscroll-behavior:none !important;
+}
+
+.happycallDetailModal{
+  height:calc(100dvh - 28px) !important;
+  max-height:calc(100dvh - 28px) !important;
+  overflow:hidden !important;
+  display:flex !important;
+  flex-direction:column !important;
+  overscroll-behavior:contain !important;
+  pointer-events:auto !important;
+}
+
+.happycallDetailModal .modalHead{
+  flex:0 0 auto !important;
+  position:relative !important;
+  z-index:3 !important;
+}
+
+.happycallDetailBody{
+  flex:1 1 auto !important;
+  height:auto !important;
+  max-height:none !important;
+  min-height:0 !important;
+  overflow-y:scroll !important;
+  overflow-x:hidden !important;
+  -webkit-overflow-scrolling:touch !important;
+  overscroll-behavior:contain !important;
+  touch-action:pan-y !important;
+  pointer-events:auto !important;
+  padding-bottom:24px !important;
+}
+
+/* 내부 요소가 터치 스크롤을 막지 않도록 */
+.happycallDetailBody *{
+  touch-action:pan-y !important;
+}
+
+/* 버튼/입력 요소는 클릭 동작 유지 */
+.happycallDetailBody button,
+.happycallDetailBody input,
+.happycallDetailBody select,
+.happycallDetailBody textarea,
+.happycallDetailBody label{
+  touch-action:manipulation !important;
+}
+
+/* V29.9/V29.10 전역 modal 규칙 무력화 - 해피콜 전용 */
+.modal.happycallDetailModal{
+  overflow:hidden !important;
+  display:flex !important;
+}
+
+.modal.happycallDetailModal .happycallDetailBody{
+  overflow-y:scroll !important;
+  display:block !important;
+}
+
+@media(max-width:768px){
+  .happycallModalBg{
+    position:fixed !important;
+    inset:0 !important;
+    height:100dvh !important;
+    max-height:100dvh !important;
+    overflow:hidden !important;
+    padding:10px !important;
+  }
+
+  .happycallDetailModal{
+    width:calc(100vw - 20px) !important;
+    height:calc(100dvh - 20px) !important;
+    max-height:calc(100dvh - 20px) !important;
+    overflow:hidden !important;
+    display:flex !important;
+    flex-direction:column !important;
+  }
+
+  .happycallDetailBody{
+    flex:1 1 auto !important;
+    height:auto !important;
+    min-height:0 !important;
+    overflow-y:scroll !important;
+    -webkit-overflow-scrolling:touch !important;
+    touch-action:pan-y !important;
+  }
+}
+
+
+/* =========================================================
+   V29.12 REPACK 해피콜 상세 터치 스크롤 재수정
+   - 기존 V29.12의 touch-action:none 영향 제거
+   - 스크롤바가 아닌 내용 영역 아무 곳이나 터치해도 스크롤
+   - 모달 뒤 해피콜 리스트 배경 스크롤 차단
+   ========================================================= */
+
+.happycallModalBg{
+  touch-action:auto !important;
+  overscroll-behavior:none !important;
+  overflow:hidden !important;
+  pointer-events:auto !important;
+}
+
+.happycallDetailModal{
+  touch-action:auto !important;
+  pointer-events:auto !important;
+  overflow:hidden !important;
+}
+
+.happycallDetailBody{
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  -webkit-overflow-scrolling:touch !important;
+  touch-action:pan-y !important;
+  overscroll-behavior:contain !important;
+  pointer-events:auto !important;
+  cursor:grab;
+}
+
+/* V29.12에서 전체 자식에 걸었던 pan-y는 입력/버튼 충돌 가능성이 있어 해피콜 본문만 제한 */
+.happycallDetailBody *{
+  touch-action:auto !important;
+}
+
+.happycallDetailBody input,
+.happycallDetailBody select,
+.happycallDetailBody textarea,
+.happycallDetailBody button,
+.happycallDetailBody label{
+  touch-action:manipulation !important;
+}
+
+/* iOS에서 실제 스크롤 컨테이너 높이 명확화 */
+@media(max-width:768px){
+  .happycallModalBg{
+    position:fixed !important;
+    inset:0 !important;
+    height:100dvh !important;
+    max-height:100dvh !important;
+    overflow:hidden !important;
+    touch-action:auto !important;
+  }
+
+  .happycallDetailModal{
+    height:calc(100dvh - 20px) !important;
+    max-height:calc(100dvh - 20px) !important;
+    display:flex !important;
+    flex-direction:column !important;
+    overflow:hidden !important;
+    touch-action:auto !important;
+  }
+
+  .happycallDetailBody{
+    flex:1 1 auto !important;
+    min-height:0 !important;
+    height:auto !important;
+    overflow-y:auto !important;
+    -webkit-overflow-scrolling:touch !important;
+    touch-action:pan-y !important;
+  }
+}

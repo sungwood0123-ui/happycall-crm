@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v29.10-20260630080626';
+const APP_BUILD_VERSION = 'v29.12-repack-20260630083808';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -3183,7 +3183,20 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
   const [tempBusy, setTempBusy] = useState(false);
   const latestLog = target.latestLog || null;
 
-  useEffect(() => { loadDetail(); }, [target.id]);
+  
+  // happycall-scroll-lock-v2912-repack
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    const prevTouchAction = document.body.style.touchAction;
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.style.touchAction = prevTouchAction;
+    };
+  }, []);
+
+useEffect(() => { loadDetail(); }, [target.id]);
   useEffect(() => {
     if (latestLog?.is_minor || latestLog?.minor_birth_date || target.minor_birth_date || latestLog?.legal_rep_join_no || target.legal_rep_join_no) {
       setIsMinorChecked(true);
@@ -3373,10 +3386,10 @@ async function save() {
   }
 
   return (
-    <div className="modalBg happycallModalBg">
+    <div className="modalBg happycallModalBg" onTouchMove={(e)=>{ if(e.target === e.currentTarget) e.preventDefault(); }}>
       <div className="modal happycallDetailModal">
         <div className="modalHead"><h2>해피콜 상세</h2><div className="modalHeadBtns">{user.role === "관리자" && <button onClick={()=>setEditJoinNoOpen(!editJoinNoOpen)}>가입번호 수정</button>}<button onClick={onClose}>닫기</button></div></div>
-        <div className="happycallDetailBody">
+        <div className="happycallDetailBody" style={{touchAction:'pan-y', WebkitOverflowScrolling:'touch', overflowY:'scroll'}}>
         {editJoinNoOpen && user.role === '관리자' && (
           <section className="joinNoEditBox">
             <h3>가입번호 수정</h3>
