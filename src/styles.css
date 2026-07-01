@@ -7253,3 +7253,219 @@ input[type="checkbox"]{
     min-width:1080px !important;
   }
 }
+
+
+/* =========================================================
+   V29.21 UI 리팩토링 + 직원 비밀번호 팝업 관리
+   ========================================================= */
+
+:root{
+  --ui-blue:#2563eb;
+  --ui-black:#111827;
+  --ui-border:#e5e7eb;
+  --ui-bg:#f6f8fb;
+  --ui-radius:12px;
+  --ui-control-h:34px;
+}
+
+/* 직원관리 테이블: 비밀번호 입력칸 제거 후 폭 재분배 */
+.employeeTable.compactEmployeeTable{
+  width:100% !important;
+  min-width:0 !important;
+  table-layout:fixed !important;
+}
+
+.employeeTable.compactEmployeeTable th,
+.employeeTable.compactEmployeeTable td{
+  padding:8px 7px !important;
+  vertical-align:middle !important;
+}
+
+.employeeTable.compactEmployeeTable th:nth-child(1),
+.employeeTable.compactEmployeeTable td:nth-child(1){width:9% !important;}
+.employeeTable.compactEmployeeTable th:nth-child(2),
+.employeeTable.compactEmployeeTable td:nth-child(2){width:9% !important;}
+.employeeTable.compactEmployeeTable th:nth-child(3),
+.employeeTable.compactEmployeeTable td:nth-child(3){width:11% !important;}
+.employeeTable.compactEmployeeTable th:nth-child(4),
+.employeeTable.compactEmployeeTable td:nth-child(4){width:10% !important;}
+.employeeTable.compactEmployeeTable th:nth-child(5),
+.employeeTable.compactEmployeeTable td:nth-child(5){width:10% !important;}
+.employeeTable.compactEmployeeTable th:nth-child(6),
+.employeeTable.compactEmployeeTable td:nth-child(6){width:12% !important;}
+.employeeTable.compactEmployeeTable th:nth-child(7),
+.employeeTable.compactEmployeeTable td:nth-child(7){width:8% !important;}
+.employeeTable.compactEmployeeTable th:nth-child(8),
+.employeeTable.compactEmployeeTable td:nth-child(8){width:8% !important;}
+
+.employeeTable.compactEmployeeTable select,
+.employeeTable.compactEmployeeTable input,
+.employeeTable.compactEmployeeTable button{
+  height:var(--ui-control-h) !important;
+  min-height:var(--ui-control-h) !important;
+  border-radius:10px !important;
+  font-size:12px !important;
+  box-sizing:border-box !important;
+}
+
+.employeeStoreSelect,
+.employeeStatusSelect,
+.employeeRoleSelect,
+.happycallAssignSelect{
+  width:100% !important;
+  min-width:0 !important;
+  max-width:100% !important;
+  padding:0 24px 0 9px !important;
+}
+
+.passwordManageBtn{
+  width:100% !important;
+  padding:0 8px !important;
+  background:var(--ui-black) !important;
+  color:#fff !important;
+  border:0 !important;
+  font-weight:800 !important;
+  white-space:nowrap !important;
+}
+
+.employeeTable.compactEmployeeTable td:nth-child(7) button,
+.employeeTable.compactEmployeeTable td:nth-child(8) button{
+  width:100% !important;
+  padding:0 8px !important;
+}
+
+.employeeBulkSaveBar{
+  border-radius:16px !important;
+}
+
+/* 공통 버튼 리듬 */
+button.primary,
+.primary{
+  background:var(--ui-blue) !important;
+  border:0 !important;
+  color:#fff !important;
+  border-radius:10px !important;
+  font-weight:900 !important;
+}
+
+.blackButton{
+  background:var(--ui-black) !important;
+  color:#fff !important;
+  border:0 !important;
+  border-radius:10px !important;
+  font-weight:900 !important;
+}
+
+/* 비밀번호 관리 모달 */
+.employeePasswordModalBg{
+  position:fixed !important;
+  inset:0 !important;
+  overflow:hidden !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  padding:14px !important;
+  z-index:10000 !important;
+}
+
+.employeePasswordModal{
+  width:min(620px, calc(100vw - 40px)) !important;
+  max-width:calc(100vw - 40px) !important;
+  max-height:calc(100dvh - 32px) !important;
+  overflow:hidden !important;
+  display:flex !important;
+  flex-direction:column !important;
+}
+
+.employeePasswordModal .modalHead{
+  flex:0 0 auto !important;
+  background:#fff !important;
+}
+
+.employeePasswordBody{
+  flex:1 1 auto !important;
+  min-height:0 !important;
+  overflow-y:auto !important;
+  -webkit-overflow-scrolling:touch !important;
+  display:grid !important;
+  grid-template-columns:1fr 1fr !important;
+  gap:14px !important;
+  padding-bottom:12px !important;
+}
+
+.employeePasswordBody section{
+  border:1px solid var(--ui-border) !important;
+  border-radius:16px !important;
+  padding:14px !important;
+  background:#fff !important;
+}
+
+.employeePasswordBody h3{
+  margin-top:0 !important;
+}
+
+.employeePasswordBody input{
+  width:100% !important;
+  height:38px !important;
+  min-height:38px !important;
+  border-radius:10px !important;
+  margin-bottom:10px !important;
+  font-size:13px !important;
+}
+
+.employeePasswordBody button{
+  width:100% !important;
+  height:38px !important;
+  min-height:38px !important;
+}
+
+/* 해피콜 배정현황 마감 보정 */
+.assignmentStatusPage{
+  max-width:1240px !important;
+}
+
+.assignmentGrid{
+  grid-template-columns:260px minmax(0,1fr) !important;
+}
+
+.assignmentEmployeeList{
+  max-width:260px !important;
+}
+
+.assignmentEmployeeList button{
+  min-height:72px !important;
+}
+
+/* 메가메뉴 마감 보정 */
+.navMegaPanel{
+  animation:megaFadeIn .12s ease-out !important;
+}
+
+@keyframes megaFadeIn{
+  from{opacity:0; transform:translateY(-4px);}
+  to{opacity:1; transform:translateY(0);}
+}
+
+@media(max-width:1200px){
+  .employeeTableWrap{
+    overflow-x:auto !important;
+  }
+  .employeeTable.compactEmployeeTable{
+    min-width:980px !important;
+  }
+}
+
+@media(max-width:768px){
+  .employeePasswordModal{
+    width:95vw !important;
+    max-width:95vw !important;
+    height:calc(100dvh - 24px) !important;
+    max-height:calc(100dvh - 24px) !important;
+  }
+  .employeePasswordBody{
+    grid-template-columns:1fr !important;
+  }
+  .employeeTable.compactEmployeeTable{
+    min-width:1040px !important;
+  }
+}

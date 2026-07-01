@@ -3636,6 +3636,7 @@ function Employees({ user }) {
   const [drafts, setDrafts] = useState({});
   const [detailTarget, setDetailTarget] = useState(null);
   const [reviewStoreTarget, setReviewStoreTarget] = useState(null);
+  const [passwordTarget, setPasswordTarget] = useState(null);
 
   useEffect(() => { load(); }, []);
 
@@ -3714,7 +3715,6 @@ function Employees({ user }) {
         (d.store_name || '') !== (normalizeOfficeStoreName(employee.store_name || '')) ||
         (d.status || '재직') !== (employee.status || '재직') ||
         (d.role || '직원') !== (employee.role || '직원') ||
-        (d.password || '') !== (employee.password || '') ||
         (d.happycall_assignment_enabled !== false) !== (employee.happycall_assignment_enabled !== false)
       );
     });
@@ -3731,14 +3731,12 @@ function Employees({ user }) {
           role: d.role || employee.role || '직원',
           happycall_assignment_enabled: d.happycall_assignment_enabled !== false
         };
-        if (d.password && d.password !== employee.password) patch.password = d.password;
         if (patch.status === '퇴사' && !employee.resign_date) patch.resign_date = todayLocalISO();
 
         const { error } = await supabase.from('employees').update(patch).eq('id', employee.id);
         if (error) throw error;
 
         const detailParts = [formatAuditPatch(patch)];
-        if (d.password && d.password !== employee.password) detailParts.push('비밀번호: 변경됨');
         await writeAuditLog('직원일괄저장', 'employee', employee.id, user, `대상: ${employee.name} / ${detailParts.join(' / ')}`);
       }
 
@@ -3805,7 +3803,7 @@ function Employees({ user }) {
               <th>매장</th>
               <th>상태</th>
               <th>권한</th>
-              <th>비밀번호 관리</th>
+              <th>비밀번호</th>
               <th>상세</th>
               <th>검수매장</th>
             </tr>
@@ -3838,12 +3836,7 @@ function Employees({ user }) {
                       <option>관리자</option><option>최고관리자</option>
                     </select>
                   </td>
-                  <td>
-                    <div className="passwordEdit">
-                      <input value={d.password ?? r.password ?? ''} onChange={e=>setDraft(r.id,{password:e.target.value})} placeholder="비밀번호" disabled={r.status === '퇴사'} />
-                      <button onClick={() => resetPassword(r)} disabled={r.status === '퇴사'}>비밀번호 초기화</button>
-                    </div>
-                  </td>
+                  <td><button className="passwordManageBtn" onClick={()=>setPasswordTarget(r)} disabled={r.status === '퇴사'}>비밀번호 관리</button></td>
                   <td><button onClick={()=>setDetailTarget(r)}>상세</button></td>
                   <td>{(d.role ?? r.role) === '검수자' || (d.role ?? r.role) === '관리자' ? <button onClick={()=>setReviewStoreTarget(r)}>설정</button> : <span className="muted">-</span>}</td>
                 </tr>
@@ -3857,9 +3850,81 @@ function Employees({ user }) {
       {storeOptions.length <= 1 && <p className="error">운영 매장 목록이 없습니다. 먼저 매장관리에서 매장을 등록해주세요.</p>}
       {detailTarget && <EmployeeDetailModal employee={detailTarget} stores={storeOptions} user={user} onClose={()=>setDetailTarget(null)} onUpdated={load} />}
       {reviewStoreTarget && <ReviewStorePermissionsModal employee={reviewStoreTarget} stores={storeOptions} user={user} onClose={()=>setReviewStoreTarget(null)} />}
+      {passwordTarget && <EmployeePasswordManageModal employee={passwordTarget} user={user} onClose={()=>setPasswordTarget(null)} onUpdated={load} />}
     </div>
   );
 }
+
+function EmployeePasswordManageModal({ employee, user, onClose, onUpdated }) {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [resetPw, setResetPw] = useState('1234');
+  const [busy, setBusy] = useState(false);
+  useModalBodyScrollLock();
+
+  async function changePassword() {
+    if ((employee.password || '') !== current) return alert('기존 비밀번호가 맞지 않습니다.');
+    if (!next || next.length < 4) return alert('희망 비밀번호는 4자리 이상 입력해주세요.');
+    if (next !== confirmPw) return alert('희망 비밀번호 확인이 일치하지 않습니다.');
+    if (!confirm(`${employee.name}님의 비밀번호를 변경할까요?`)) return;
+
+    setBusy(true);
+    const { error } = await supabase.from('employees').update({ password: next }).eq('id', employee.id);
+    setBusy(false);
+    if (error) return alert(error.message);
+
+    await writeAuditLog('직원비밀번호변경', 'employee', employee.id, user, `대상: ${employee.name} / 비밀번호 변경`);
+    alert('비밀번호가 변경되었습니다.');
+    onUpdated?.();
+    onClose();
+  }
+
+  async function resetPassword() {
+    if (!resetPw || resetPw.length < 4) return alert('초기화 비밀번호는 4자리 이상 입력해주세요.');
+    if (!confirm(`${employee.name}님의 비밀번호를 ${resetPw}로 초기화할까요?`)) return;
+
+    setBusy(true);
+    const { error } = await supabase.from('employees').update({ password: resetPw }).eq('id', employee.id);
+    setBusy(false);
+    if (error) return alert(error.message);
+
+    await writeAuditLog('직원비밀번호초기화', 'employee', employee.id, user, `대상: ${employee.name} / 초기화 비밀번호: ${resetPw}`);
+    alert('비밀번호가 초기화되었습니다.');
+    onUpdated?.();
+    onClose();
+  }
+
+  return (
+    <div className="modalBg employeePasswordModalBg">
+      <div className="modal employeePasswordModal">
+        <div className="modalHead"><h2>{employee.name} 비밀번호 관리</h2><button onClick={onClose}>닫기</button></div>
+        <div className="employeePasswordBody">
+          <section>
+            <h3>비밀번호 변경</h3>
+            <p className="muted">기존 비밀번호를 확인한 뒤 희망 비밀번호로 변경합니다.</p>
+            <label>기존 비밀번호</label>
+            <input type="password" value={current} onChange={e=>setCurrent(e.target.value)} placeholder="기존 비밀번호" />
+            <label>희망 비밀번호</label>
+            <input type="password" value={next} onChange={e=>setNext(e.target.value)} placeholder="새 비밀번호" />
+            <label>희망 비밀번호 확인</label>
+            <input type="password" value={confirmPw} onChange={e=>setConfirmPw(e.target.value)} placeholder="새 비밀번호 재입력" onKeyDown={e=>{ if(e.key==='Enter') changePassword(); }} />
+            <button className="primary" onClick={changePassword} disabled={busy}>비밀번호 변경</button>
+          </section>
+
+          <section>
+            <h3>비밀번호 초기화</h3>
+            <p className="muted">직원이 비밀번호를 모를 때 관리자가 지정한 값으로 초기화합니다.</p>
+            <label>초기화 비밀번호</label>
+            <input value={resetPw} onChange={e=>setResetPw(e.target.value)} placeholder="예: 1234" />
+            <button className="blackButton" onClick={resetPassword} disabled={busy}>비밀번호 초기화</button>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function EmployeeDetailModal({ employee, stores, user, onClose, onUpdated }) {
   const [profile, setProfile] = useState({
