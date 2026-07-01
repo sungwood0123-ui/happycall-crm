@@ -6513,3 +6513,205 @@ table th,table td{padding:9px 8px !important;vertical-align:middle !important;li
     gap:4px !important;
   }
 }
+
+
+/* =========================================================
+   V29.17 오류보고/배정현황 회귀 수정
+   ========================================================= */
+
+/* 체크박스 색감 통일: 갈색/브라우저 강조색 대신 블루 계열 */
+input[type="checkbox"]{
+  accent-color:#2563eb !important;
+}
+
+/* 오류보고 리스트: 열 깨짐 수정 */
+.errorTableCard{
+  overflow:hidden !important;
+}
+.errorTableScroll{
+  width:100% !important;
+  overflow-x:auto !important;
+  -webkit-overflow-scrolling:touch !important;
+}
+.errorReportsTable{
+  min-width:1080px !important;
+  table-layout:fixed !important;
+}
+.errorReportsTable th,
+.errorReportsTable td{
+  padding:8px 7px !important;
+  font-size:12px !important;
+  vertical-align:middle !important;
+  white-space:nowrap !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+}
+.errorReportsTable th:nth-child(1), .errorReportsTable td:nth-child(1){width:150px !important;}
+.errorReportsTable th:nth-child(2), .errorReportsTable td:nth-child(2){width:52px !important; text-align:center !important;}
+.errorReportsTable th:nth-child(3), .errorReportsTable td:nth-child(3){width:90px !important;}
+.errorReportsTable th:nth-child(4), .errorReportsTable td:nth-child(4){width:90px !important;}
+.errorReportsTable th:nth-child(5), .errorReportsTable td:nth-child(5){width:90px !important;}
+.errorReportsTable th:nth-child(6), .errorReportsTable td:nth-child(6){width:120px !important;}
+.errorReportsTable th:nth-child(7), .errorReportsTable td:nth-child(7){width:110px !important;}
+.errorReportsTable th:nth-child(8), .errorReportsTable td:nth-child(8){width:auto !important;}
+.errorReportsTable th:nth-child(9), .errorReportsTable td:nth-child(9){width:120px !important;}
+
+.errorPreviewBox{
+  width:100% !important;
+  max-width:100% !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+  text-align:left !important;
+  min-height:34px !important;
+  height:34px !important;
+  padding:6px 10px !important;
+  font-size:12px !important;
+  background:#f8fafc !important;
+  color:#111827 !important;
+  border:1px solid #e5e7eb !important;
+}
+
+/* 오류보고 상세 모달: 내부 스크롤 */
+.errorDetailModalBg{
+  position:fixed !important;
+  inset:0 !important;
+  overflow:hidden !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  padding:14px !important;
+  z-index:10000 !important;
+}
+.errorDetailModal{
+  width:min(980px, calc(100vw - 40px)) !important;
+  max-width:calc(100vw - 40px) !important;
+  max-height:calc(100dvh - 32px) !important;
+  height:auto !important;
+  overflow:hidden !important;
+  display:flex !important;
+  flex-direction:column !important;
+  margin:0 !important;
+}
+.errorDetailModal .modalHead{
+  flex:0 0 auto !important;
+  background:#fff !important;
+  z-index:2 !important;
+}
+.errorDetailBody{
+  flex:1 1 auto !important;
+  min-height:0 !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  -webkit-overflow-scrolling:touch !important;
+  overscroll-behavior:contain !important;
+  touch-action:pan-y !important;
+  padding-bottom:16px !important;
+}
+.errorDetailBody .actionRow{
+  position:sticky !important;
+  bottom:0 !important;
+  background:#fff !important;
+  padding-top:10px !important;
+  border-top:1px solid #e5e7eb !important;
+}
+
+/* 배정현황: 상단 검색폭과 하단 리스트 폭 일관성 보정 */
+.assignmentStatusPage{
+  max-width:1280px !important;
+  margin:0 auto !important;
+}
+.assignmentControlBar{
+  grid-template-columns:230px 150px minmax(0,1fr) !important;
+  max-width:100% !important;
+}
+.assignmentGrid{
+  grid-template-columns:280px minmax(0,1fr) !important;
+  max-width:100% !important;
+}
+.assignmentEmployeeList{
+  padding:12px !important;
+  max-width:280px !important;
+}
+.assignmentEmployeeList button{
+  min-height:76px !important;
+  padding:10px 12px !important;
+  border-radius:12px !important;
+}
+.assignmentEmployeeTop b{
+  font-size:14px !important;
+}
+.assignmentEmployeeTop span{
+  font-size:11px !important;
+}
+.assignmentEmployeeStats{
+  gap:4px !important;
+  margin-top:7px !important;
+}
+.assignmentEmployeeStats span{
+  padding:5px 3px !important;
+}
+.assignmentEmployeeStats strong{
+  font-size:14px !important;
+}
+.assignmentEmployeeStats small{
+  font-size:9.5px !important;
+}
+.assignmentTargetList{
+  min-width:0 !important;
+  overflow:hidden !important;
+}
+.assignmentListHead{
+  display:grid !important;
+  grid-template-columns:minmax(0,1fr) 240px !important;
+  gap:12px !important;
+  align-items:start !important;
+}
+.assignmentReassignBox{
+  min-width:0 !important;
+  width:240px !important;
+}
+.assignmentTableWrap{
+  max-width:100% !important;
+  overflow-x:auto !important;
+}
+.assignmentStatusTable{
+  min-width:820px !important;
+  width:100% !important;
+}
+.assignmentStatusTable th,
+.assignmentStatusTable td{
+  font-size:12px !important;
+  padding:7px 5px !important;
+}
+.assignmentStatusTable th:nth-child(1), .assignmentStatusTable td:nth-child(1){width:32px !important;}
+.assignmentStatusTable th:nth-child(2), .assignmentStatusTable td:nth-child(2){width:170px !important;}
+.assignmentStatusTable th:nth-child(3), .assignmentStatusTable td:nth-child(3){width:100px !important;}
+.assignmentStatusTable th:nth-child(4), .assignmentStatusTable td:nth-child(4){width:90px !important;}
+.assignmentStatusTable th:nth-child(5), .assignmentStatusTable td:nth-child(5){width:105px !important;}
+.assignmentStatusTable th:nth-child(6), .assignmentStatusTable td:nth-child(6){width:120px !important;}
+.assignmentStatusTable th:nth-child(7), .assignmentStatusTable td:nth-child(7){width:90px !important;}
+
+@media(max-width:768px){
+  .errorDetailModal{
+    width:95vw !important;
+    max-width:95vw !important;
+    height:calc(100dvh - 24px) !important;
+    max-height:calc(100dvh - 24px) !important;
+    padding:14px !important;
+  }
+  .assignmentStatusPage{
+    max-width:100% !important;
+  }
+  .assignmentControlBar,
+  .assignmentGrid,
+  .assignmentListHead{
+    grid-template-columns:1fr !important;
+  }
+  .assignmentEmployeeList{
+    max-width:100% !important;
+  }
+  .assignmentReassignBox{
+    width:100% !important;
+  }
+}

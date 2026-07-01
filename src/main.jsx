@@ -2403,7 +2403,7 @@ function HomeDashboard({ user, setTab }) {
     try{
       const today = todayLocalISO ? todayLocalISO() : new Date().toISOString().slice(0,10);
 
-      const {data:mine}=await supabase.from('happycall_targets').select('id,status,assigned_to,assigned_employee_name,target_date').eq('assigned_employee_name',user.name);
+      const {data:mine}=await supabase.from('happycall_targets').select('id,status,assigned_to,assigned_employee,target_date').eq('assigned_employee',user.name);
       setHappyCount((mine||[]).filter(r => !['통화 완료','최종완료','완료'].includes(r.status)).length);
 
       if(isAdminLike(user)){
@@ -2429,7 +2429,7 @@ function HomeDashboard({ user, setTab }) {
 
       if(isAdminLike(user)){
         const {data:er}=await supabase.from('error_reports').select('id,status');
-        setErrors((er||[]).filter(r=>!['완료','해결'].includes(r.status)).length);
+        setErrors((er||[]).filter(r=>!['완료','해결','해결완료','보류'].includes(r.status)).length);
       }
     }catch(e){
       console.warn('dashboard load failed', e);
@@ -4281,6 +4281,8 @@ function ErrorReportsViewer({ user }) {
     const { error } = await supabase.from('error_reports').update({ status }).eq('id', row.id);
     if (error) return alert(error.message);
     await writeAuditLog('오류보고상태변경', 'error_reports', row.id, user, `${row.reporter_name} / ${status}`);
+    setRows(prev => prev.map(x => x.id === row.id ? { ...x, status } : x));
+    setSelected(prev => prev && prev.id === row.id ? { ...prev, status } : prev);
     load();
   }
 
@@ -4307,11 +4309,12 @@ function ErrorReportsViewer({ user }) {
         <input placeholder="작업자/작업/가입번호/오류 검색" value={keyword} onChange={e=>setKeyword(e.target.value)} />
         <button onClick={() => { setStatusFilter('전체'); setKeyword(''); }}>초기화</button>
       </div>
-      <div className="sectionCard">
-        <table>
+      <div className="sectionCard errorTableCard">
+        <div className="errorTableScroll">
+        <table className="errorReportsTable">
           <thead>
             <tr>
-              <th>일시(KST)</th><th>보고자</th><th>권한</th><th>매장</th><th>작업</th><th>가입번호</th><th>오류내용</th><th>상태</th>
+              <th>일시(KST)</th><th>횟수</th><th>보고자</th><th>권한</th><th>매장</th><th>작업</th><th>가입번호</th><th>오류내용</th><th>상태</th>
             </tr>
           </thead>
           <tbody>
@@ -4338,9 +4341,10 @@ function ErrorReportsViewer({ user }) {
                 </td>
               </tr>
             ))}
-            {!filtered.length && <tr><td colSpan="8" className="muted">오류보고가 없습니다.</td></tr>}
+            {!filtered.length && <tr><td colSpan="9" className="muted">오류보고가 없습니다.</td></tr>}
           </tbody>
         </table>
+        </div>
       </div>
 
       {selected && <ErrorReportDetailModal row={selected} onClose={() => setSelected(null)} />}
@@ -4349,6 +4353,7 @@ function ErrorReportsViewer({ user }) {
 }
 
 function ErrorReportDetailModal({ row, onClose }) {
+  useModalBodyScrollLock();
   const detailText = `오류보고 상세
 일시: ${formatKST(row.created_at)}
 보고자: ${row.reporter_name || '-'}
@@ -4375,12 +4380,13 @@ ${row.user_agent || '-'}`;
   }
 
   return (
-    <div className="modalBg">
+    <div className="modalBg errorDetailModalBg">
       <div className="modal errorDetailModal">
         <div className="modalHead">
           <h2>오류보고 상세</h2>
           <button onClick={onClose}>닫기</button>
         </div>
+        <div className="errorDetailBody">
 
         <section>
           <h3>작업 상황</h3>
@@ -4411,6 +4417,7 @@ ${row.user_agent || '-'}`;
           <textarea className="errorCopyText" readOnly value={detailText} />
           <button className="primary" onClick={copyDetail}>전체 내용 복사</button>
         </section>
+        </div>
       </div>
     </div>
   );
@@ -4827,7 +4834,7 @@ function HappycallAssignmentStatus({ user }) {
   }, [logs]);
 
   function currentAssigneeName(t) {
-    return t.temporary_assignee || t.assigned_employee || t.assigned_employee_name || '';
+    return t.temporary_assignee || t.assigned_employee || '';
   }
 
   const employeeCounts = useMemo(() => {
@@ -4890,7 +4897,6 @@ function HappycallAssignmentStatus({ user }) {
     try {
       const patch = {
         assigned_employee: targetEmp.name,
-        assigned_employee_name: targetEmp.name,
         assigned_store: targetEmp.store_name,
         temporary_assignee: null,
         updated_at: new Date().toISOString()
