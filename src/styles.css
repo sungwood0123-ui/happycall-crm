@@ -7731,3 +7731,34 @@ button.primary,
 @media(max-width:768px){
   .assignmentModeTabs{grid-template-columns:1fr 1fr !important; display:grid !important;}
 }
+
+
+/* =========================================================
+   V29.24 운영 안정화: 로딩 상태 / 배정현황 기준 보정
+   ========================================================= */
+
+.loadingState{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  min-height:72px !important;
+  color:#475569 !important;
+  font-weight:800 !important;
+  background:#f8fafc !important;
+  border-radius:12px !important;
+}
+
+.assignmentModeHint{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  height:36px !important;
+  min-height:36px !important;
+  padding:0 10px !important;
+  border:1px solid #e5e7eb !important;
+  border-radius:10px !important;
+  background:#f8fafc !important;
+  color:#475569 !important;
+  font-size:13px !important;
+  font-weight:800 !important;
+}

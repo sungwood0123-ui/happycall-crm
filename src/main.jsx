@@ -686,6 +686,7 @@ function UpdateNotice({ user }) {
     let timer;
 
     function visibleRolesForUser(role) {
+      if (isSuperAdmin(user)) return ['직원', '점장', '검수자', '관리자', '최고관리자'];
       if (role === '관리자') return ['직원', '점장', '검수자', '관리자'];
       if (role === '점장') return ['직원', '점장'];
       if (role === '검수자') return ['직원', '검수자'];
@@ -1339,6 +1340,7 @@ function AccrualRequestTab({ user }) {
 function FreepassApprovalQueue({ user, mode }) {
   const [rows,setRows]=useState([]);
   const [selected,setSelected]=useState(null);
+  const [loading,setLoading]=useState(true);
 
   useEffect(()=>{load();},[mode]);
 
@@ -1353,14 +1355,22 @@ function FreepassApprovalQueue({ user, mode }) {
   }
 
   async function load(){
-    const {data}=await supabase.from('freepass_requests').select('*').order('requested_at',{ascending:false});
-    let list=data||[];
-    if(mode==='manager'){
-      list=list.filter(r=>r.status==='점장승인대기');
-      if(user.role==='점장') list=list.filter(r=>r.employee_store===user.store_name);
+    setLoading(true);
+    try{
+      const {data,error}=await supabase.from('freepass_requests').select('*').order('requested_at',{ascending:false});
+      if(error) throw error;
+      let list=data||[];
+      if(mode==='manager'){
+        list=list.filter(r=>r.status==='점장승인대기');
+        if(user.role==='점장') list=list.filter(r=>r.employee_store===user.store_name);
+      }
+      if(mode==='final') list=list.filter(r=>r.status==='최종승인대기');
+      setRows(list);
+    }catch(e){
+      askErrorReport({user,currentTab:'프리패스 승인',actionName:'승인 목록 조회',error:e});
+    }finally{
+      setLoading(false);
     }
-    if(mode==='final') list=list.filter(r=>r.status==='최종승인대기');
-    setRows(list);
   }
 
   async function approve(row){
@@ -1449,7 +1459,8 @@ function FreepassApprovalQueue({ user, mode }) {
               <td>{r.reason}</td>
               <td>{r.status}</td>
             </tr>)}
-            {!rows.length&&<tr className="approvalEmptyRow"><td colSpan="7"><div className="approvalEmptyText">승인 대기 건이 없습니다.</div></td></tr>}
+            {loading&&<tr className="approvalEmptyRow"><td colSpan="7"><div className="loadingState">승인 대기 목록을 불러오는 중입니다...</div></td></tr>}
+            {!loading&&!rows.length&&<tr className="approvalEmptyRow"><td colSpan="7"><div className="approvalEmptyText">승인 대기 건이 없습니다.</div></td></tr>}
           </tbody>
         </table>
       </div>
@@ -2424,8 +2435,9 @@ function HomeDashboard({ user, setTab }) {
         setFinalPending((fp2||[]).length);
       }
 
-      const {data:sg}=await supabase.from('suggestions').select('id,status');
-      setSuggestions((sg||[]).filter(r=>!['완료','종료'].includes(r.status)).length);
+      const {data:sg}=await supabase.from('suggestions').select('id,status,requester_name');
+      const visibleSuggestions = isAdminLike(user) ? (sg||[]) : (sg||[]).filter(r => r.requester_name === user.name);
+      setSuggestions(visibleSuggestions.filter(r=>!['완료','종료'].includes(r.status)).length);
 
       if(isAdminLike(user)){
         const {data:er}=await supabase.from('error_reports').select('id,status');
@@ -2958,6 +2970,7 @@ function CallList({ user, mode, readOnly = false }) {
   const [logs, setLogs] = useState([]);
   const [customersByJoinNo, setCustomersByJoinNo] = useState({});
   const [selected, setSelected] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('미완료전체');
   const [bulkTempOpen, setBulkTempOpen] = useState(false);
   const [storeFilter, setStoreFilter] = useState('전체');
@@ -4193,19 +4206,23 @@ function SuggestionsPage({ user }) {
   const [statusFilter, setStatusFilter] = useState('전체');
   const [keyword, setKeyword] = useState('');
   const [selected, setSelected] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
+    setLoading(true);
     try {
       const data = await fetchAllRows('suggestions', '*', 'created_at');
       let list = data || [];
-      if (user.role !== '관리자') {
+      if (!isAdminLike(user)) {
         list = list.filter(r => r.requester_name === user.name);
       }
       setRows(list.sort((a,b)=>String(b.created_at || '').localeCompare(String(a.created_at || ''))));
     } catch (e) {
       askErrorReport({ user, currentTab: '건의/문의', actionName: '건의 목록 조회', error: e });
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -4382,6 +4399,7 @@ function ErrorReportsViewer({ user }) {
   const [statusFilter, setStatusFilter] = useState('전체');
   const [keyword, setKeyword] = useState('');
   const [selected, setSelected] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { load(); }, []);
 
@@ -4887,6 +4905,7 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
 
 function HappycallAssignmentStatus({ user }) {
   const [employees, setEmployees] = useState([]);
+  const [assignableEmployees, setAssignableEmployees] = useState([]);
   const [targets, setTargets] = useState([]);
   const [logs, setLogs] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -4931,39 +4950,25 @@ function HappycallAssignmentStatus({ user }) {
       ]);
 
       const validTargets = (targetData || []).filter(t => !t.is_skipped);
-      const latestCustomerRecords = makeLatestCustomerRecords(customerData || []);
-      const customerNames = latestCustomerRecords.map(c => customerAssigneeName(c)).filter(Boolean);
-      const targetNames = validTargets.map(t => currentAssigneeName(t)).filter(Boolean);
-      const activeEmployeeNames = (empData || []).filter(e => isHappycallAssignableEmployee(e)).map(e => e.name).filter(Boolean);
-      const allNames = Array.from(new Set([...customerNames, ...targetNames, ...activeEmployeeNames]));
+      const normalizedEmployees = (empData || []).map(e => ({ ...e, store_name: normalizeOfficeStoreName(e.store_name) }));
+      const permanentAssignedNames = new Set(validTargets.map(t => t.assigned_employee).filter(Boolean));
+      const currentHappycallNames = new Set(validTargets.map(t => currentAssigneeName(t)).filter(Boolean));
 
-      const empMap = new Map((empData || []).map(e => [e.name, { ...e, store_name: normalizeOfficeStoreName(e.store_name) }]));
-      const customerStoreMap = new Map();
-      latestCustomerRecords.forEach(c => {
-        const name = customerAssigneeName(c);
-        if (name && !customerStoreMap.has(name)) customerStoreMap.set(name, normalizeOfficeStoreName(customerStoreName(c)) || '미지정');
-      });
+      const visibleEmployees = normalizedEmployees
+        .filter(e => permanentAssignedNames.has(e.name) || currentHappycallNames.has(e.name))
+        .sort((a,b)=>String(a.store_name || '').localeCompare(String(b.store_name || ''), 'ko') || String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
 
-      const visibleEmployees = allNames.map(name => {
-        const found = empMap.get(name);
-        if (found) return found;
-        return {
-          id: `assigned-only-${name}`,
-          name,
-          store_name: customerStoreMap.get(name) || '미지정',
-          role: '배정자',
-          status: '배정 있음',
-          happycall_assignment_enabled: false,
-          assignedOnly: true
-        };
-      }).sort((a,b)=>String(a.store_name || '').localeCompare(String(b.store_name || ''), 'ko') || String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
+      const assignable = normalizedEmployees
+        .filter(e => isHappycallAssignableEmployee(e))
+        .sort((a,b)=>String(a.store_name || '').localeCompare(String(b.store_name || ''), 'ko') || String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
 
       setEmployees(visibleEmployees);
+      setAssignableEmployees(assignable);
       setTargets(validTargets);
       setLogs(logData || []);
       setCustomers(customerData || []);
       setCustomersByJoinNo(Object.fromEntries(latestCustomerRecords.map(c => [c.join_no, c])));
-      if (!selectedEmployee && visibleEmployees.length) setSelectedEmployee(visibleEmployees[0].name);
+      if ((!selectedEmployee || !visibleEmployees.some(e => e.name === selectedEmployee)) && visibleEmployees.length) setSelectedEmployee(visibleEmployees[0].name);
     } catch (e) {
       askErrorReport({ user, currentTab:'배정 현황', actionName:'배정 현황 조회', error:e });
     }
@@ -4992,16 +4997,32 @@ function HappycallAssignmentStatus({ user }) {
 
   const latestCustomerRecords = useMemo(() => makeLatestCustomerRecords(customers), [customers]);
 
+  const permanentAssigneeByJoinNo = useMemo(() => {
+    const sorted = [...(targets || [])].sort((a,b) =>
+      String(b.target_date || '').localeCompare(String(a.target_date || '')) || String(b.id || '').localeCompare(String(a.id || ''))
+    );
+    const map = new Map();
+    sorted.forEach(t => {
+      const key = String(t.join_no || '').trim();
+      if (key && !map.has(key) && t.assigned_employee) {
+        map.set(key, { name: t.assigned_employee, store: t.assigned_store || '' });
+      }
+    });
+    return map;
+  }, [targets]);
+
   const customerCounts = useMemo(() => {
     const map = {};
     employees.forEach(e => { map[e.name] = { customers:0 }; });
     latestCustomerRecords.forEach(c => {
-      const name = customerAssigneeName(c) || '미지정';
+      const assigned = permanentAssigneeByJoinNo.get(String(c.join_no || '').trim());
+      const name = assigned?.name;
+      if (!name) return;
       if (!map[name]) map[name] = { customers:0 };
       map[name].customers += 1;
     });
     return map;
-  }, [employees, latestCustomerRecords]);
+  }, [employees, latestCustomerRecords, permanentAssigneeByJoinNo]);
 
   const happycallCounts = useMemo(() => {
     const map = {};
@@ -5019,13 +5040,13 @@ function HappycallAssignmentStatus({ user }) {
   }, [employees, targets, latestLogByTarget]);
 
   const selectedCustomerRecords = useMemo(() => {
-    let list = latestCustomerRecords.filter(c => customerAssigneeName(c) === selectedEmployee);
+    let list = latestCustomerRecords.filter(c => permanentAssigneeByJoinNo.get(String(c.join_no || '').trim())?.name === selectedEmployee);
     const kw = keyword.trim().toLowerCase();
     if (kw) {
       list = list.filter(c => `${c.join_no || ''} ${customerDisplayName(c)} ${customerStoreName(c)} ${c.open_date || ''}`.toLowerCase().includes(kw));
     }
     return list.sort((a,b)=>String(b.open_date || '').localeCompare(String(a.open_date || '')) || String(a.join_no || '').localeCompare(String(b.join_no || '')));
-  }, [latestCustomerRecords, selectedEmployee, keyword]);
+  }, [latestCustomerRecords, selectedEmployee, keyword, permanentAssigneeByJoinNo]);
 
   const selectedHappycallTargets = useMemo(() => {
     let list = targets.filter(t => currentAssigneeName(t) === selectedEmployee);
@@ -5122,7 +5143,7 @@ function HappycallAssignmentStatus({ user }) {
     }
   }
 
-  const activeTargetEmployees = employees.filter(e => e.name !== selectedEmployee && isHappycallAssignableEmployee(e) && !e.assignedOnly);
+  const activeTargetEmployees = assignableEmployees.filter(e => e.name !== selectedEmployee);
   const selectedHappyCount = happycallCounts[selectedEmployee] || { total:0, pending:0, rejected:0 };
   const selectedCustomerCount = customerCounts[selectedEmployee]?.customers || 0;
 
@@ -5230,9 +5251,9 @@ function HappycallAssignmentStatus({ user }) {
                           <td className="checkCol"><input type="checkbox" checked={selectedIds.includes(id)} onChange={()=>toggleSelected(id)} /></td>
                           <td>{formatCustomerJoinNo(c.join_no, customersByJoinNo, customerDisplayName(c))}</td>
                           <td>{customerDisplayName(c)}</td>
-                          <td>{displayStoreNameForUi(customerStoreName(c)) || '-'}</td>
+                          <td>{displayStoreNameForUi(permanentAssigneeByJoinNo.get(String(c.join_no || '').trim())?.store) || '-'}</td>
                           <td>{c.open_date || '-'}</td>
-                          <td>{customerAssigneeName(c) || '-'}</td>
+                          <td>{permanentAssigneeByJoinNo.get(String(c.join_no || '').trim())?.name || '-'}</td>
                         </tr>
                       );
                     })}
@@ -5286,6 +5307,7 @@ function ReviewDashboard({ user }) {
   const [logs, setLogs] = useState([]);
   const [customersByJoinNo, setCustomersByJoinNo] = useState({});
   const [selected, setSelected] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('검수대기');
   const [employeeFilter, setEmployeeFilter] = useState('전체');
   const [storeFilter, setStoreFilter] = useState('전체');
@@ -6635,6 +6657,7 @@ function ManagerStoreDashboard({ user }) {
   const [targets, setTargets] = useState([]);
   const [logs, setLogs] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [loading, setLoading] = useState(true);
   useEffect(() => { load(); }, []);
   async function load() {
     try {
@@ -6708,6 +6731,7 @@ function ManagerStoreDashboardV6({ user }) {
   const [targets, setTargets] = useState([]);
   const [logs, setLogs] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('미완료전체');
 
   useEffect(() => { load(); }, []);
