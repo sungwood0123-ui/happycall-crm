@@ -8163,3 +8163,182 @@ button.primary,
     min-width:620px !important;
   }
 }
+
+
+/* =========================================================
+   V29.26 공통 UI 밀도/로딩/드롭다운 안정화
+   ========================================================= */
+
+:root{
+  --sc-control-height:36px;
+  --sc-mobile-control-height:42px;
+  --sc-cell-x:8px;
+  --sc-card-pad:16px;
+}
+
+/* 공통 select/input: 글자 하단 잘림 방지 */
+select,
+input,
+textarea{
+  box-sizing:border-box !important;
+}
+
+select{
+  min-height:var(--sc-control-height) !important;
+  height:var(--sc-control-height) !important;
+  line-height:normal !important;
+  padding-top:0 !important;
+  padding-bottom:0 !important;
+  vertical-align:middle !important;
+  font-size:13px !important;
+  text-align-last:center;
+}
+
+/* 전역 테이블 밀도: 너무 넓게 벌어지는 좌우 여백 축소 */
+.sectionCard table th,
+.sectionCard table td{
+  padding-left:var(--sc-cell-x) !important;
+  padding-right:var(--sc-cell-x) !important;
+}
+
+.sectionCard{
+  padding:var(--sc-card-pad) !important;
+}
+
+/* 금촌    정대화    잔여시간처럼 과하게 벌어지는 느낌 완화 */
+.compactFreepassTable,
+.freepassApprovalTable,
+.assignmentStatusTable,
+.employeeTable,
+.errorReportsTable{
+  table-layout:fixed !important;
+}
+
+.compactFreepassTable th,
+.compactFreepassTable td,
+.freepassApprovalTable th,
+.freepassApprovalTable td{
+  padding-left:7px !important;
+  padding-right:7px !important;
+}
+
+/* 로딩은 한 줄, 낮은 높이, 데이터 자리 안에서만 표시 */
+.inlineLoadingState{
+  width:100% !important;
+  min-height:40px !important;
+  padding:8px 10px !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  gap:8px !important;
+  color:#64748b !important;
+  font-size:13px !important;
+  font-weight:700 !important;
+  line-height:1.25 !important;
+  white-space:nowrap !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  background:#f8fafc !important;
+  border:1px solid #eef2f7 !important;
+  border-radius:10px !important;
+}
+
+.loadingDot{
+  width:8px !important;
+  height:8px !important;
+  min-width:8px !important;
+  border-radius:50% !important;
+  background:#2563eb !important;
+  animation:loadingPulse .9s ease-in-out infinite alternate !important;
+}
+
+@keyframes loadingPulse{
+  from{opacity:.35; transform:scale(.85);}
+  to{opacity:1; transform:scale(1);}
+}
+
+/* 기존 두꺼운 로딩 박스 무력화 */
+.loadingState{
+  min-height:42px !important;
+  padding:8px 10px !important;
+  font-size:13px !important;
+  font-weight:700 !important;
+  line-height:1.25 !important;
+  white-space:nowrap !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  border-radius:10px !important;
+}
+
+/* 모바일: 화면 폭을 더 효율적으로 사용 */
+@media(max-width:768px){
+  :root{
+    --sc-control-height:42px;
+    --sc-card-pad:14px;
+    --sc-cell-x:6px;
+  }
+
+  .appShell,
+  main{
+    padding-left:10px !important;
+    padding-right:10px !important;
+  }
+
+  .sectionCard{
+    padding:14px 12px !important;
+    border-radius:16px !important;
+  }
+
+  select,
+  input,
+  textarea{
+    min-height:42px !important;
+    height:42px !important;
+    font-size:15px !important;
+    line-height:normal !important;
+  }
+
+  select{
+    padding-left:10px !important;
+    padding-right:26px !important;
+    text-align-last:center;
+  }
+
+  .sectionCard table th,
+  .sectionCard table td{
+    padding-left:6px !important;
+    padding-right:6px !important;
+  }
+
+  .inlineLoadingState,
+  .loadingState{
+    min-height:38px !important;
+    padding:7px 8px !important;
+    font-size:12.5px !important;
+    white-space:nowrap !important;
+  }
+
+  .freepassModule .sectionCard{
+    padding:14px 12px !important;
+  }
+
+  .freepassModule .moduleTabs{
+    gap:8px !important;
+  }
+
+  .freepassModule .moduleTabs button{
+    height:44px !important;
+    min-height:44px !important;
+  }
+
+  .freepassOverviewTable.compactFreepassTable th,
+  .freepassOverviewTable.compactFreepassTable td{
+    padding-left:5px !important;
+    padding-right:5px !important;
+  }
+
+  .freepassApprovalTable tr.clickableRow{
+    min-height:88px !important;
+    padding:12px !important;
+  }
+}

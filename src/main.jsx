@@ -1507,18 +1507,26 @@ function FreepassLogTab({ user }) {
   const [keyword,setKeyword]=useState('');
   const [storeFilter,setStoreFilter]=useState('전체');
   const [typeFilter,setTypeFilter]=useState('전체');
+  const [loading,setLoading]=useState(true);
 
   useEffect(()=>{ load(); },[]);
 
   async function load(){
-    const [ledgerRes, requestRes, empRes] = await Promise.all([
-      supabase.from('freepass_ledger').select('*').order('created_at',{ascending:false}),
-      supabase.from('freepass_requests').select('*').order('requested_at',{ascending:false}),
-      supabase.from('employees').select('*').order('store_name')
-    ]);
-    setLedger(ledgerRes.data || []);
-    setRequests(requestRes.data || []);
-    setEmployees(empRes.data || []);
+    setLoading(true);
+    try{
+      const [ledgerRes, requestRes, empRes] = await Promise.all([
+        supabase.from('freepass_ledger').select('*').order('created_at',{ascending:false}),
+        supabase.from('freepass_requests').select('*').order('requested_at',{ascending:false}),
+        supabase.from('employees').select('*').order('store_name')
+      ]);
+      setLedger(ledgerRes.data || []);
+      setRequests(requestRes.data || []);
+      setEmployees(empRes.data || []);
+    }catch(e){
+      askErrorReport({user,currentTab:'프리패스 로그',actionName:'로그 조회',error:e});
+    }finally{
+      setLoading(false);
+    }
   }
 
   function normalizeType(v){
@@ -1587,7 +1595,8 @@ function FreepassLogTab({ user }) {
       <table className="freepassLogTable">
         <thead><tr><th>유형</th><th>시간</th><th>요청일시</th><th>실제일</th><th>매장</th><th>직원</th><th>내용</th><th>처리자</th></tr></thead>
         <tbody>
-          {filtered.map(r=><tr key={r.id}>
+          {loading && <tr><td colSpan="9"><InlineLoadingState label="프리패스 로그를 불러오는 중입니다" /></td></tr>}
+            {!loading && filtered.map(r=><tr key={r.id}>
             <td>{r.type}</td>
             <td>{freepassLedgerSignedHours(r)}시간</td>
             <td>{r.requestedAt || formatKST(r.at)}</td>
@@ -1782,17 +1791,28 @@ function FreepassStoreOverview({ user }) {
   const [employees,setEmployees]=useState([]);
   const [selected,setSelected]=useState(null);
   const [requests,setRequests]=useState([]);
+  const [loading,setLoading]=useState(true);
 
   useEffect(()=>{ load(); },[]);
 
   async function load(){
-    const {data:l}=await supabase.from('freepass_ledger').select('*').order('created_at',{ascending:false});
-    const {data:req}=await supabase.from('freepass_requests').select('*').order('requested_at',{ascending:false});
-    const {data:e}=await supabase.from('employees').select('*').eq('status','재직').order('name');
-    const visibleEmployees = isAdminLike(user) ? (e || []) : (e || []).filter(emp => emp.store_name === user.store_name);
-    setLedger(l||[]);
-    setRequests(req||[]);
-    setEmployees(visibleEmployees);
+    setLoading(true);
+    try{
+      const [ledgerRes, reqRes, empRes] = await Promise.all([
+        supabase.from('freepass_ledger').select('*').order('created_at',{ascending:false}),
+        supabase.from('freepass_requests').select('*').order('requested_at',{ascending:false}),
+        supabase.from('employees').select('*').eq('status','재직').order('name')
+      ]);
+      const e = empRes.data || [];
+      const visibleEmployees = isAdminLike(user) ? e : e.filter(emp => emp.store_name === user.store_name);
+      setLedger(ledgerRes.data||[]);
+      setRequests(reqRes.data||[]);
+      setEmployees(visibleEmployees);
+    }catch(e){
+      askErrorReport({user,currentTab:'프리패스 전체현황',actionName:'전체현황 조회',error:e});
+    }finally{
+      setLoading(false);
+    }
   }
 
   const rows = sortEmployeesForLogin(employees);
@@ -1822,7 +1842,8 @@ function FreepassStoreOverview({ user }) {
               </tr>
             );
           })}
-          {!rows.length && <tr><td colSpan="5" className="muted">표시할 직원이 없습니다.</td></tr>}
+          {loading && <tr><td colSpan="5"><InlineLoadingState label="프리패스 현황을 불러오는 중입니다" /></td></tr>}
+          {!loading && !rows.length && <tr><td colSpan="5" className="muted">표시할 직원이 없습니다.</td></tr>}
         </tbody>
       </table>
 
@@ -2079,6 +2100,7 @@ function AccessoryOrdersPage({ user }) {
   const [newOrder,setNewOrder]=useState({ customer_name:'', order_source:'개통', payment_type:'무료제공', customer_payment_amount:'', items:[emptyItem()] });
   const [editingId,setEditingId]=useState(null);
   const [busy,setBusy]=useState(false);
+  const [loading,setLoading]=useState(true);
   const [statusModal,setStatusModal]=useState(null);
   const [statusDraft,setStatusDraft]=useState({next:'', expected_arrival_date:'', return_reason:'고객 변심', return_reason_extra:''});
 
@@ -2088,6 +2110,7 @@ function AccessoryOrdersPage({ user }) {
   useEffect(()=>{ load(); },[]);
 
   async function load(){
+    setLoading(true);
     try{
       const {data,error}=await supabase.from('accessory_orders').select('*').order('created_at',{ascending:false});
       if(error) throw error;
@@ -2095,6 +2118,8 @@ function AccessoryOrdersPage({ user }) {
     }catch(e){
       console.warn('accessory_orders load failed', e);
       askErrorReport?.({user,currentTab:'악세사리 주문',actionName:'주문 목록 불러오기',error:e});
+    }finally{
+      setLoading(false);
     }
   }
 
@@ -2733,6 +2758,11 @@ function diffDays(dateText, baseText = todayLocalISO()) {
 }
 
 
+
+function InlineLoadingState({ label = '데이터를 불러오는 중입니다' }) {
+  return <div className="inlineLoadingState"><span className="loadingDot" />{label}</div>;
+}
+
 function useModalBodyScrollLock() {
   useEffect(() => {
     const prevOverflow = document.body.style.overflow;
@@ -3005,6 +3035,7 @@ function CallList({ user, mode, readOnly = false }) {
   useEffect(() => { load(); }, [mode]);
 
   async function load() {
+    setLoading(true);
     try {
       let allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
       let visible = (allTargets || []).filter(t => !t.is_skipped);
@@ -3022,6 +3053,8 @@ function CallList({ user, mode, readOnly = false }) {
       setLogs(allLogs || []);
     } catch (e) {
       alert('해피콜 리스트 조회 오류: ' + e.message);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -4430,11 +4463,14 @@ function ErrorReportsViewer({ user }) {
   useEffect(() => { load(); }, []);
 
   async function load() {
+    setLoading(true);
     try {
       const data = await fetchAllRows('error_reports', '*', 'created_at');
       setRows((data || []).sort((a,b)=>String(b.created_at || '').localeCompare(String(a.created_at || ''))));
     } catch (e) {
       alert('오류보고 조회 오류: ' + e.message);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -4479,7 +4515,8 @@ function ErrorReportsViewer({ user }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(r => (
+            {loading && <tr><td colSpan="9"><InlineLoadingState label="오류보고를 불러오는 중입니다" /></td></tr>}
+            {!loading && filtered.map(r => (
               <tr key={r.id}>
                 <td>{formatKST(r.created_at)}</td><td>{r.occurrence_count || 1}</td>
                 <td>{r.reporter_name}</td>
@@ -4502,7 +4539,7 @@ function ErrorReportsViewer({ user }) {
                 </td>
               </tr>
             ))}
-            {!filtered.length && <tr><td colSpan="9" className="muted">오류보고가 없습니다.</td></tr>}
+            {!loading && !filtered.length && <tr><td colSpan="9" className="muted">오류보고가 없습니다.</td></tr>}
           </tbody>
         </table>
         </div>
@@ -4589,15 +4626,19 @@ function AuditLogsViewer() {
   const [actorFilter, setActorFilter] = useState('전체');
   const [actionFilter, setActionFilter] = useState('전체');
   const [keyword, setKeyword] = useState('');
+  const [loading,setLoading]=useState(true);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
+    setLoading(true);
     try {
       const rows = await fetchAllRows('audit_logs', '*', 'created_at');
       setLogs((rows || []).sort((a,b)=>String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 500));
     } catch (e) {
       alert('감사로그 조회 오류: ' + e.message);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -4634,7 +4675,8 @@ function AuditLogsViewer() {
             <tr><th>일시(KST)</th><th>작업자</th><th>작업</th><th>상세</th></tr>
           </thead>
           <tbody>
-            {filteredLogs.map(l => (
+            {loading && <tr><td colSpan="4"><InlineLoadingState label="감사로그를 불러오는 중입니다" /></td></tr>}
+            {!loading && filteredLogs.map(l => (
               <tr key={l.id}>
                 <td>{formatKST(l.created_at)}</td>
                 <td>{l.actor_name}</td>
@@ -5344,6 +5386,7 @@ function ReviewDashboard({ user }) {
   useEffect(() => { load(); }, []);
 
   async function load() {
+    setLoading(true);
     try {
       const allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
       const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
@@ -5365,6 +5408,8 @@ function ReviewDashboard({ user }) {
       setLogs(allLogs || []);
     } catch (e) {
       askErrorReport({ user, currentTab: '검수', actionName: '검수 목록 조회', error: e });
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -6837,6 +6882,7 @@ function ManagerStoreDashboardV6({ user }) {
                 <td>{r.overdue}</td><td>{r.voc}</td>
               </tr>
             ))}
+            {!loading && !filtered.length && <tr><td colSpan="9" className="muted">로그가 없습니다.</td></tr>}
           </tbody>
         </table>
       </div>
