@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v29.22-20260702065800';
+const APP_BUILD_VERSION = 'v29.23-20260703043549';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -4889,15 +4889,37 @@ function HappycallAssignmentStatus({ user }) {
   const [employees, setEmployees] = useState([]);
   const [targets, setTargets] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [customersByJoinNo, setCustomersByJoinNo] = useState({});
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [targetEmployeeId, setTargetEmployeeId] = useState('');
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState('미완료전체');
+  const [assignmentMode, setAssignmentMode] = useState('customers');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { load(); }, []);
+
+  function customerAssigneeName(c) {
+    return c?.seller_name || c?.assigned_employee || c?.employee_name || '';
+  }
+
+  function customerStoreName(c) {
+    return c?.store_name || c?.assigned_store || '';
+  }
+
+  function customerDisplayName(c) {
+    return c?.customer_name || c?.name || c?.customer_name_masked || '-';
+  }
+
+  function currentAssigneeName(t) {
+    return t.temporary_assignee || t.assigned_employee || '';
+  }
+
+  function currentAssigneeStore(t) {
+    return t.temporary_assignee ? (t.temporary_assignee_store || t.assigned_store) : t.assigned_store;
+  }
 
   async function load() {
     try {
@@ -4909,36 +4931,54 @@ function HappycallAssignmentStatus({ user }) {
       ]);
 
       const validTargets = (targetData || []).filter(t => !t.is_skipped);
-      const assigneeNames = Array.from(new Set(validTargets.map(t => currentAssigneeName(t)).filter(Boolean)));
+      const latestCustomerRecords = makeLatestCustomerRecords(customerData || []);
+      const customerNames = latestCustomerRecords.map(c => customerAssigneeName(c)).filter(Boolean);
+      const targetNames = validTargets.map(t => currentAssigneeName(t)).filter(Boolean);
+      const activeEmployeeNames = (empData || []).filter(e => isHappycallAssignableEmployee(e)).map(e => e.name).filter(Boolean);
+      const allNames = Array.from(new Set([...customerNames, ...targetNames, ...activeEmployeeNames]));
+
       const empMap = new Map((empData || []).map(e => [e.name, { ...e, store_name: normalizeOfficeStoreName(e.store_name) }]));
-      const combinedEmployees = assigneeNames.map(name => {
+      const customerStoreMap = new Map();
+      latestCustomerRecords.forEach(c => {
+        const name = customerAssigneeName(c);
+        if (name && !customerStoreMap.has(name)) customerStoreMap.set(name, normalizeOfficeStoreName(customerStoreName(c)) || '미지정');
+      });
+
+      const visibleEmployees = allNames.map(name => {
         const found = empMap.get(name);
-        return found || {
+        if (found) return found;
+        return {
           id: `assigned-only-${name}`,
           name,
-          store_name: '미지정',
+          store_name: customerStoreMap.get(name) || '미지정',
           role: '배정자',
           status: '배정 있음',
           happycall_assignment_enabled: false,
           assignedOnly: true
         };
-      });
-      (empData || []).forEach(e => {
-        if (isHappycallAssignableEmployee(e) && !combinedEmployees.some(x => x.name === e.name)) {
-          combinedEmployees.push({ ...e, store_name: normalizeOfficeStoreName(e.store_name) });
-        }
-      });
-      const visibleEmployees = combinedEmployees
-        .sort((a,b)=>String(a.store_name || '').localeCompare(String(b.store_name || ''), 'ko') || String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
+      }).sort((a,b)=>String(a.store_name || '').localeCompare(String(b.store_name || ''), 'ko') || String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
 
       setEmployees(visibleEmployees);
       setTargets(validTargets);
       setLogs(logData || []);
-      setCustomersByJoinNo(Object.fromEntries((customerData || []).map(c => [c.join_no, c])));
+      setCustomers(customerData || []);
+      setCustomersByJoinNo(Object.fromEntries(latestCustomerRecords.map(c => [c.join_no, c])));
       if (!selectedEmployee && visibleEmployees.length) setSelectedEmployee(visibleEmployees[0].name);
     } catch (e) {
       askErrorReport({ user, currentTab:'배정 현황', actionName:'배정 현황 조회', error:e });
     }
+  }
+
+  function makeLatestCustomerRecords(rows) {
+    const sorted = [...(rows || [])].sort((a,b) =>
+      String(b.open_date || '').localeCompare(String(a.open_date || '')) || String(b.id || '').localeCompare(String(a.id || ''))
+    );
+    const map = new Map();
+    sorted.forEach(c => {
+      const key = String(c.join_no || '').trim();
+      if (key && !map.has(key)) map.set(key, c);
+    });
+    return Array.from(map.values());
   }
 
   const latestLogByTarget = useMemo(() => {
@@ -4950,15 +4990,24 @@ function HappycallAssignmentStatus({ user }) {
     return map;
   }, [logs]);
 
-  function currentAssigneeName(t) {
-    return t.temporary_assignee || t.assigned_employee || '';
-  }
+  const latestCustomerRecords = useMemo(() => makeLatestCustomerRecords(customers), [customers]);
 
-  const employeeCounts = useMemo(() => {
+  const customerCounts = useMemo(() => {
+    const map = {};
+    employees.forEach(e => { map[e.name] = { customers:0 }; });
+    latestCustomerRecords.forEach(c => {
+      const name = customerAssigneeName(c) || '미지정';
+      if (!map[name]) map[name] = { customers:0 };
+      map[name].customers += 1;
+    });
+    return map;
+  }, [employees, latestCustomerRecords]);
+
+  const happycallCounts = useMemo(() => {
     const map = {};
     employees.forEach(e => { map[e.name] = { total:0, pending:0, done:0, rejected:0 }; });
     targets.forEach(t => {
-      const name = currentAssigneeName(t);
+      const name = currentAssigneeName(t) || '미지정';
       if (!map[name]) map[name] = { total:0, pending:0, done:0, rejected:0 };
       const latest = latestLogByTarget[t.id];
       map[name].total += 1;
@@ -4969,7 +5018,16 @@ function HappycallAssignmentStatus({ user }) {
     return map;
   }, [employees, targets, latestLogByTarget]);
 
-  const selectedTargets = useMemo(() => {
+  const selectedCustomerRecords = useMemo(() => {
+    let list = latestCustomerRecords.filter(c => customerAssigneeName(c) === selectedEmployee);
+    const kw = keyword.trim().toLowerCase();
+    if (kw) {
+      list = list.filter(c => `${c.join_no || ''} ${customerDisplayName(c)} ${customerStoreName(c)} ${c.open_date || ''}`.toLowerCase().includes(kw));
+    }
+    return list.sort((a,b)=>String(b.open_date || '').localeCompare(String(a.open_date || '')) || String(a.join_no || '').localeCompare(String(b.join_no || '')));
+  }, [latestCustomerRecords, selectedEmployee, keyword]);
+
+  const selectedHappycallTargets = useMemo(() => {
     let list = targets.filter(t => currentAssigneeName(t) === selectedEmployee);
     if (statusFilter !== '전체') {
       list = list.filter(t => {
@@ -4980,74 +5038,116 @@ function HappycallAssignmentStatus({ user }) {
         return true;
       });
     }
-    const kw = keyword.trim();
+    const kw = keyword.trim().toLowerCase();
     if (kw) {
       list = list.filter(t => {
         const c = customersByJoinNo[t.join_no] || {};
-        return String(t.join_no || '').includes(kw) ||
-          String(c.customer_name || c.name || t.customer_name || '').includes(kw) ||
-          String(t.assigned_store || '').includes(kw) ||
-          String(t.call_type || t.target_type || '').includes(kw);
+        return `${t.join_no || ''} ${customerDisplayName(c)} ${t.assigned_store || ''} ${t.call_type || t.target_type || ''}`.toLowerCase().includes(kw);
       });
     }
     return list.sort((a,b)=>String(a.target_date || '').localeCompare(String(b.target_date || '')));
   }, [targets, selectedEmployee, statusFilter, keyword, latestLogByTarget, customersByJoinNo]);
 
-  const allSelected = selectedTargets.length > 0 && selectedTargets.every(t => selectedIds.includes(t.id));
+  const visibleRows = assignmentMode === 'customers' ? selectedCustomerRecords : selectedHappycallTargets;
+  const rowKey = row => assignmentMode === 'customers' ? String(row.join_no) : row.id;
+  const allSelected = visibleRows.length > 0 && visibleRows.every(row => selectedIds.includes(rowKey(row)));
+
+  function changeMode(mode) {
+    setAssignmentMode(mode);
+    setSelectedIds([]);
+    setTargetEmployeeId('');
+  }
 
   function toggleSelected(id) {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
 
   function toggleAll(checked) {
-    const ids = selectedTargets.map(t => t.id);
+    const ids = visibleRows.map(rowKey);
     setSelectedIds(prev => checked ? Array.from(new Set([...prev, ...ids])) : prev.filter(id => !ids.includes(id)));
   }
 
-  async function reassignSelected() {
-    if (!selectedIds.length) return alert('재배정할 고객을 선택해주세요.');
+  async function reassignSelectedCustomers() {
+    const rows = selectedCustomerRecords.filter(c => selectedIds.includes(String(c.join_no)));
+    if (!rows.length) return alert('담당자를 변경할 고객을 선택해주세요.');
     const targetEmp = employees.find(e => String(e.id) === String(targetEmployeeId));
-    if (!targetEmp) return alert('재배정 받을 직원을 선택해주세요.');
-    if (!confirm(`${selectedIds.length}건을 ${targetEmp.store_name} · ${targetEmp.name} 직원에게 재배정할까요?\n\n기존 담당자는 변경되고, 감사로그에 기록됩니다.`)) return;
+    if (!targetEmp) return alert('변경할 담당자를 선택해주세요.');
+    const joinNos = rows.map(c => String(c.join_no));
+    if (!confirm(`선택한 고객 ${rows.length}명의 담당자를\n\n${selectedEmployee} → ${targetEmp.name}\n\n으로 영구 변경할까요?\n\n※ 이후 생성되는 모든 해피콜은 새 담당자 기준으로 생성됩니다.`)) return;
 
     setBusy(true);
     try {
-      const patch = {
-        assigned_employee: targetEmp.name,
-        assigned_store: targetEmp.store_name,
-        temporary_assignee: null
-      };
-      const { error } = await supabase.from('happycall_targets').update(patch).in('id', selectedIds);
+      const { error } = await supabase.from('customers').update({
+        seller_name: targetEmp.name,
+        store_name: targetEmp.store_name
+      }).in('join_no', joinNos);
       if (error) throw error;
 
-      await writeAuditLog('해피콜일괄재배정', 'happycall_targets', 'bulk', user, `${selectedIds.length}건 → ${targetEmp.store_name} / ${targetEmp.name}`);
-      alert(`${selectedIds.length}건이 ${targetEmp.name} 직원에게 재배정되었습니다.`);
+      await writeAuditLog('고객담당자영구변경', 'customers', 'bulk', user, `${rows.length}명 / ${selectedEmployee} → ${targetEmp.store_name} · ${targetEmp.name}`);
+      alert(`${rows.length}명의 고객 담당자가 ${targetEmp.name}님으로 변경되었습니다.`);
       setSelectedIds([]);
       setTargetEmployeeId('');
       load();
     } catch (e) {
-      askErrorReport({ user, currentTab:'배정 현황', actionName:'일괄 재배정', error:e });
+      askErrorReport({ user, currentTab:'배정 현황', actionName:'고객 담당자 영구 변경', error:e });
     } finally {
       setBusy(false);
     }
   }
 
+  async function reassignSelectedHappycalls() {
+    const rows = selectedHappycallTargets.filter(t => selectedIds.includes(t.id));
+    if (!rows.length) return alert('재배정할 해피콜을 선택해주세요.');
+    const targetEmp = employees.find(e => String(e.id) === String(targetEmployeeId));
+    if (!targetEmp) return alert('해피콜 처리자를 선택해주세요.');
+    if (!confirm(`선택한 해피콜 ${rows.length}건을\n\n${selectedEmployee} → ${targetEmp.name}\n\n으로 1회 변경할까요?\n\n※ 이번에 생성된 해피콜에만 적용됩니다. 고객 담당자는 변경되지 않습니다.`)) return;
+
+    setBusy(true);
+    try {
+      const { error } = await supabase.from('happycall_targets').update({
+        temporary_assignee: targetEmp.name,
+        temporary_assignee_store: targetEmp.store_name
+      }).in('id', rows.map(t => t.id));
+      if (error) throw error;
+
+      await writeAuditLog('해피콜일회성재배정', 'happycall_targets', 'bulk', user, `${rows.length}건 / ${selectedEmployee} → ${targetEmp.store_name} · ${targetEmp.name}`);
+      alert(`${rows.length}건의 해피콜 처리자가 ${targetEmp.name}님으로 변경되었습니다.`);
+      setSelectedIds([]);
+      setTargetEmployeeId('');
+      load();
+    } catch (e) {
+      askErrorReport({ user, currentTab:'배정 현황', actionName:'해피콜 1회 재배정', error:e });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const activeTargetEmployees = employees.filter(e => e.name !== selectedEmployee && isHappycallAssignableEmployee(e) && !e.assignedOnly);
+  const selectedHappyCount = happycallCounts[selectedEmployee] || { total:0, pending:0, rejected:0 };
+  const selectedCustomerCount = customerCounts[selectedEmployee]?.customers || 0;
+
   return (
     <div className="assignmentStatusPage">
       <h2>해피콜 배정 현황</h2>
       <div className="sectionCard assignmentControlBar">
-        <select value={selectedEmployee} onChange={e=>{setSelectedEmployee(e.target.value); setSelectedIds([]);}}>
+        <select value={selectedEmployee} onChange={e=>{setSelectedEmployee(e.target.value); setSelectedIds([]); setTargetEmployeeId('');}}>
           {employees.map(e => {
-            const c = employeeCounts[e.name] || {};
-            return <option key={e.id} value={e.name}>{e.store_name} · {e.name} · {c.total || 0}건</option>;
+            const hc = happycallCounts[e.name] || { total:0 };
+            const cc = customerCounts[e.name]?.customers || 0;
+            const count = assignmentMode === 'customers' ? cc : hc.total;
+            return <option key={e.id || e.name} value={e.name}>{displayStoreNameForUi(e.store_name)} · {e.name} · {count}건</option>;
           })}
         </select>
-        <select value={statusFilter} onChange={e=>{setStatusFilter(e.target.value); setSelectedIds([]);}}>
-          <option value="미완료전체">미완료+반려</option>
-          <option value="완료">완료</option>
-          <option value="검수반려">반려</option>
-          <option value="전체">전체</option>
-        </select>
+        {assignmentMode === 'happycalls' ? (
+          <select value={statusFilter} onChange={e=>{setStatusFilter(e.target.value); setSelectedIds([]);}}>
+            <option value="미완료전체">미완료+반려</option>
+            <option value="완료">완료</option>
+            <option value="검수반려">반려</option>
+            <option value="전체">전체</option>
+          </select>
+        ) : (
+          <div className="assignmentModeHint">담당 고객 전체</div>
+        )}
         <input value={keyword} onChange={e=>setKeyword(e.target.value)} placeholder="가입번호/고객명/매장 검색" />
       </div>
 
@@ -5055,17 +5155,18 @@ function HappycallAssignmentStatus({ user }) {
         <div className="sectionCard assignmentEmployeeList">
           <h3>직원별 배정</h3>
           {employees.map(e => {
-            const c = employeeCounts[e.name] || { total:0, pending:0, done:0, rejected:0 };
+            const hc = happycallCounts[e.name] || { total:0, pending:0, rejected:0 };
+            const cc = customerCounts[e.name]?.customers || 0;
             return (
-              <button key={e.id || e.name} className={selectedEmployee===e.name?'active':''} onClick={()=>{setSelectedEmployee(e.name); setSelectedIds([]);}}>
+              <button key={e.id || e.name} className={selectedEmployee===e.name?'active':''} onClick={()=>{setSelectedEmployee(e.name); setSelectedIds([]); setTargetEmployeeId('');}}>
                 <div className="assignmentEmployeeTop">
                   <b>{e.name}</b>
                   <span>{displayStoreNameForUi(e.store_name)} · {e.role || '직원'}</span>
                 </div>
-                <div className="assignmentEmployeeStats">
-                  <span><strong>{c.total || 0}</strong><small>전체</small></span>
-                  <span><strong>{c.pending || 0}</strong><small>미완료</small></span>
-                  <span><strong>{c.rejected || 0}</strong><small>반려</small></span>
+                <div className="assignmentEmployeeStats twoMode">
+                  <span><strong>{cc}</strong><small>고객</small></span>
+                  <span><strong>{hc.total || 0}</strong><small>해피콜</small></span>
+                  <span><strong>{hc.pending || 0}</strong><small>미완료</small></span>
                 </div>
               </button>
             );
@@ -5073,57 +5174,105 @@ function HappycallAssignmentStatus({ user }) {
         </div>
 
         <div className="sectionCard assignmentTargetList">
+          <div className="assignmentModeTabs">
+            <button className={assignmentMode === 'customers' ? 'active' : ''} onClick={()=>changeMode('customers')}>배정된 고객</button>
+            <button className={assignmentMode === 'happycalls' ? 'active' : ''} onClick={()=>changeMode('happycalls')}>배정된 해피콜</button>
+          </div>
+
+          <div className="assignmentModeDescription">
+            {assignmentMode === 'customers' ? (
+              <p><b>고객의 담당자를 영구적으로 변경합니다.</b> 이후 생성되는 모든 해피콜도 변경된 담당자를 기준으로 배정됩니다.</p>
+            ) : (
+              <p><b>배정된 해피콜 담당자만 1회 변경합니다.</b> 고객 담당자가 영구적으로 변경되는 것은 아닙니다.</p>
+            )}
+          </div>
+
           <div className="assignmentListHead">
             <div>
-              <h3>{selectedEmployee || '-'} 배정 고객</h3>
+              <h3>{selectedEmployee || '-'} {assignmentMode === 'customers' ? '배정 고객' : '배정 해피콜'}</h3>
               <div className="assignmentSummaryBadges">
                 <span><b>{selectedIds.length}</b>선택</span>
-                <span><b>{selectedTargets.length}</b>표시</span>
-                <span><b>{employeeCounts[selectedEmployee]?.pending || 0}</b>미완료</span>
-                <span><b>{employeeCounts[selectedEmployee]?.rejected || 0}</b>반려</span>
+                <span><b>{visibleRows.length}</b>표시</span>
+                <span><b>{selectedCustomerCount}</b>담당고객</span>
+                <span><b>{selectedHappyCount.total || 0}</b>담당해피콜</span>
               </div>
             </div>
             <div className="assignmentReassignBox">
               <select value={targetEmployeeId} onChange={e=>setTargetEmployeeId(e.target.value)}>
-                <option value="">재배정 받을 직원 선택</option>
-                {employees.filter(e => e.name !== selectedEmployee && isHappycallAssignableEmployee(e) && !e.assignedOnly).map(e => <option key={e.id} value={e.id}>{displayStoreNameForUi(e.store_name)} · {e.name}</option>)}
+                <option value="">{assignmentMode === 'customers' ? '변경할 담당자 선택' : '1회 처리자 선택'}</option>
+                {activeTargetEmployees.map(e => <option key={e.id} value={e.id}>{displayStoreNameForUi(e.store_name)} · {e.name}</option>)}
               </select>
-              <button className="primary" disabled={busy || !selectedIds.length || !targetEmployeeId} onClick={reassignSelected}>선택 재배정</button>
+              <button className="primary" disabled={busy || !selectedIds.length || !targetEmployeeId} onClick={assignmentMode === 'customers' ? reassignSelectedCustomers : reassignSelectedHappycalls}>
+                {assignmentMode === 'customers' ? '선택 고객 영구 변경' : '선택 해피콜 재배정'}
+              </button>
             </div>
           </div>
 
           <div className="assignmentTableWrap">
-            <table className="assignmentStatusTable">
-              <thead>
-                <tr>
-                  <th className="checkCol"><input type="checkbox" checked={allSelected} onChange={e=>toggleAll(e.target.checked)} /></th>
-                  <th>가입번호</th>
-                  <th>고객명</th>
-                  <th>매장</th>
-                  <th>대상일</th>
-                  <th>유형</th>
-                  <th>상태</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedTargets.map(t => {
-                  const latest = latestLogByTarget[t.id];
-                  const c = customersByJoinNo[t.join_no] || {};
-                  const state = latest?.review_status === '반려' ? '반려' : latest ? '완료' : '미완료';
-                  return (
-                    <tr key={t.id}>
-                      <td className="checkCol"><input type="checkbox" checked={selectedIds.includes(t.id)} onChange={()=>toggleSelected(t.id)} /></td>
-                      <td>{formatCustomerJoinNo(t.join_no, customersByJoinNo, t.customer_name)}</td>
-                      <td>{c.customer_name || c.name || t.customer_name || '-'}</td>
-                      <td>{displayStoreNameForUi(t.assigned_store) || '-'}</td>
-                      <td>{t.target_date || '-'}</td>
-                      <td>{t.call_type || t.target_type || '-'}</td>
-                      <td>{state}</td>
+            <table className="assignmentStatusTable assignmentDualTable">
+              {assignmentMode === 'customers' ? (
+                <>
+                  <thead>
+                    <tr>
+                      <th className="checkCol"><input type="checkbox" checked={allSelected} onChange={e=>toggleAll(e.target.checked)} /></th>
+                      <th>가입번호</th>
+                      <th>고객명</th>
+                      <th>담당매장</th>
+                      <th>최근 개통일</th>
+                      <th>현재 담당자</th>
                     </tr>
-                  );
-                })}
-                {!selectedTargets.length && <tr><td colSpan="7" className="muted">표시할 배정 고객이 없습니다.</td></tr>}
-              </tbody>
+                  </thead>
+                  <tbody>
+                    {selectedCustomerRecords.map(c => {
+                      const id = String(c.join_no);
+                      return (
+                        <tr key={id}>
+                          <td className="checkCol"><input type="checkbox" checked={selectedIds.includes(id)} onChange={()=>toggleSelected(id)} /></td>
+                          <td>{formatCustomerJoinNo(c.join_no, customersByJoinNo, customerDisplayName(c))}</td>
+                          <td>{customerDisplayName(c)}</td>
+                          <td>{displayStoreNameForUi(customerStoreName(c)) || '-'}</td>
+                          <td>{c.open_date || '-'}</td>
+                          <td>{customerAssigneeName(c) || '-'}</td>
+                        </tr>
+                      );
+                    })}
+                    {!selectedCustomerRecords.length && <tr><td colSpan="6" className="muted">표시할 배정 고객이 없습니다.</td></tr>}
+                  </tbody>
+                </>
+              ) : (
+                <>
+                  <thead>
+                    <tr>
+                      <th className="checkCol"><input type="checkbox" checked={allSelected} onChange={e=>toggleAll(e.target.checked)} /></th>
+                      <th>가입번호</th>
+                      <th>고객명</th>
+                      <th>매장</th>
+                      <th>대상일</th>
+                      <th>유형</th>
+                      <th>상태</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedHappycallTargets.map(t => {
+                      const latest = latestLogByTarget[t.id];
+                      const c = customersByJoinNo[t.join_no] || {};
+                      const state = latest?.review_status === '반려' ? '반려' : latest ? '완료' : '미완료';
+                      return (
+                        <tr key={t.id}>
+                          <td className="checkCol"><input type="checkbox" checked={selectedIds.includes(t.id)} onChange={()=>toggleSelected(t.id)} /></td>
+                          <td>{formatCustomerJoinNo(t.join_no, customersByJoinNo, t.customer_name)}</td>
+                          <td>{customerDisplayName(c)}</td>
+                          <td>{displayStoreNameForUi(currentAssigneeStore(t)) || '-'}</td>
+                          <td>{t.target_date || '-'}</td>
+                          <td>{callTypeLabel(t.call_type || t.target_type || '-')}</td>
+                          <td>{state}</td>
+                        </tr>
+                      );
+                    })}
+                    {!selectedHappycallTargets.length && <tr><td colSpan="7" className="muted">표시할 배정 해피콜이 없습니다.</td></tr>}
+                  </tbody>
+                </>
+              )}
             </table>
           </div>
         </div>
@@ -5131,7 +5280,6 @@ function HappycallAssignmentStatus({ user }) {
     </div>
   );
 }
-
 
 function ReviewDashboard({ user }) {
   const [targets, setTargets] = useState([]);
