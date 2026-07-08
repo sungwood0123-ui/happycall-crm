@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v29.31-20260708153000';
+const APP_BUILD_VERSION = 'v29.33-20260708171000';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -470,6 +470,15 @@ function pendingDebitHours(rows, employeeName, excludeId = null) {
     .filter(r => r.request_type === '사용' || r.request_type === '월차 전환')
     .reduce((sum, r) => sum + Math.abs(Number(r.hours || 0)), 0);
 }
+function pendingActualUseHoursInMonth(rows, employeeName, ym = todayLocalISO().slice(0,7), excludeId = null) {
+  return (rows || [])
+    .filter(r => r.employee_name === employeeName)
+    .filter(r => r.id !== excludeId)
+    .filter(r => isPendingFreepassRequest(r.status))
+    .filter(r => r.request_type === '사용')
+    .filter(r => String(r.request_date || r.created_at || '').slice(0,7) === ym)
+    .reduce((sum, r) => sum + Math.abs(Number(r.hours || 0)), 0);
+}
 
 function getBalanceTone(balance) {
   const n = Number(balance || 0);
@@ -558,7 +567,10 @@ function freepassTypeLabel(value) {
 }
 
 function isFreepassDebitType(value) {
-  return ['사용','차감','월차전환','월차 전환'].includes(value);
+  return ['사용','사용처리','차감','월차전환','월차 전환'].includes(value);
+}
+function isFreepassActualUseType(value) {
+  return ['사용','사용처리'].includes(value);
 }
 function freepassLedgerSignedHours(row) {
   const raw = Number(row?.hours || 0);
@@ -575,8 +587,41 @@ function freepassBalanceOf(rows, name) {
 }
 function freepassUsedInMonth(rows, name, ym = todayLocalISO().slice(0,7)) {
   return (rows || [])
-    .filter(r => r.employee_name === name && String(r.effective_date || r.created_at || '').slice(0,7) === ym && isFreepassDebitType(r.type))
+    .filter(r => r.employee_name === name && String(r.effective_date || r.created_at || '').slice(0,7) === ym && isFreepassActualUseType(r.type))
     .reduce((s,r)=>s+Math.abs(Number(r.hours || 0)),0);
+}
+
+function formatTimeHHMM(date) {
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return `${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
+}
+function freepassUseAvailability({ requestType, useType, requestDate, hours, employeeEndTime }) {
+  if (requestType !== '사용' || !requestDate) return null;
+  const h = Number(hours || 0);
+  if (!h || h <= 0) return null;
+  const now = new Date();
+  const requestDay = new Date(`${requestDate}T00:00:00`);
+  let deadline = null;
+  if (useType === '오전 늦게 출근') {
+    deadline = new Date(`${requestDate}T01:00:00`);
+  } else if (useType === '오후 일찍 퇴근') {
+    const endTime = normalizeWorkEndTime(employeeEndTime || '20:00');
+    const [hh, mm] = String(endTime).split(':').map(Number);
+    const normalEndTime = new Date(requestDay);
+    normalEndTime.setHours(hh || 20, mm || 0, 0, 0);
+    const actualLeaveTime = new Date(normalEndTime);
+    actualLeaveTime.setHours(actualLeaveTime.getHours() - h);
+    deadline = new Date(actualLeaveTime);
+    deadline.setHours(deadline.getHours() - 2);
+  }
+  if (!deadline) return null;
+  const available = now <= deadline;
+  return {
+    available,
+    title: available ? '신청 가능 시간' : '신청 불가 시간',
+    message: available ? `${formatTimeHHMM(deadline)}까지 신청 가능합니다.` : '신청 가능 시간이 지났습니다.',
+    tone: available ? 'available' : 'unavailable'
+  };
 }
 
 function freepassPhotoTimeLabel(iso) {
@@ -629,21 +674,11 @@ function validateFreepassRequest({ requestType, useType, requestDate, hours, use
     deadline.setHours(deadline.getHours() - 2);
 
     if (now > deadline) {
-      const endLabel = `${String(hh || 20).padStart(2,'0')}:${String(mm || 0).padStart(2,'0')}`;
-      const leaveLabel = `${String(actualLeaveTime.getHours()).padStart(2,'0')}:${String(actualLeaveTime.getMinutes()).padStart(2,'0')}`;
       const deadlineLabel = `${String(deadline.getHours()).padStart(2,'0')}:${String(deadline.getMinutes()).padStart(2,'0')}`;
-      return `오후 프리패스는 신청 시점 기준으로 실제 퇴근 시간 2시간 전까지만 신청 가능합니다.
+      return `신청 가능 시간이 지났습니다.
 
-현재 신청 조건
-정상 퇴근: ${endLabel}
-사용 시간: ${h}시간
-실제 퇴근: ${leaveLabel}
-신청 마감: ${deadlineLabel} 전
-
-예시)
-18시 퇴근 / 2시간 사용 → 16시 퇴근 → 14시 전 신청
-20시 퇴근 / 2시간 사용 → 18시 퇴근 → 16시 전 신청
-20시 퇴근 / 3시간 사용 → 17시 퇴근 → 15시 전 신청`;
+오후 프리패스는 실제 사용 시간 기준 2시간 이전까지만 신청 가능합니다.
+신청 가능 시간: ${deadlineLabel}까지`;
     }
   }
 
@@ -1085,6 +1120,7 @@ function FreepassRequestForm({ user }) {
   const [busy,setBusy]=useState(false);
   const [monthlyLimit,setMonthlyLimit]=useState(10);
   const employeeEndTime = employeeWorkEndTime(user);
+  const availability = freepassUseAvailability({ requestType, useType, requestDate, hours: requestType === '월차 전환' ? 10 : hours, employeeEndTime });
   useEffect(()=>{ supabase.from('freepass_ledger').select('*').then(({data})=>setLedger(data||[])); supabase.from('freepass_requests').select('*').eq('employee_name', user.name).then(({data})=>setRequests(data||[])); getFreepassMonthlyLimit().then(setMonthlyLimit); },[]);
   async function onPhoto(file){
     if(!file) return;
@@ -1099,7 +1135,8 @@ function FreepassRequestForm({ user }) {
   }
   async function submit(){
     if(!reason.trim()) return alert('사유를 입력해주세요.');
-    const currentUsed=freepassUsedInMonth(ledger,user.name,String(requestDate).slice(0,7));
+    const requestYm = String(requestDate).slice(0,7);
+    const currentUsed=freepassUsedInMonth(ledger,user.name,requestYm) + pendingActualUseHoursInMonth(requests,user.name,requestYm);
     const effectiveHours = requestType === '월차 전환' ? 10 : Number(hours);
     const validation=validateFreepassRequest({requestType,useType,requestDate,hours:effectiveHours,useStartTime:employeeEndTime,currentUsed,monthlyLimit});
     if(validation) return alert(validation);
@@ -1141,8 +1178,12 @@ function FreepassRequestForm({ user }) {
       {requestType==='사용' && <label>사용 구분<select value={useType} onChange={e=>setUseType(e.target.value)}><option>오전 늦게 출근</option><option>오후 일찍 퇴근</option></select></label>}
       <label>사용/적립일<input type="date" value={requestDate} onChange={e=>setRequestDate(e.target.value)} /></label>
       <label>시간<select value={hours} onChange={e=>setHours(Number(e.target.value))}>{requestType==='월차 전환'?<option value={10}>10시간</option>:<><option value={1}>1시간</option><option value={2}>2시간</option><option value={3}>3시간</option></>}</select></label>
-      {requestType==='사용' && useType==='오후 일찍 퇴근' && <label>기준 퇴근시간<input type="time" value={employeeEndTime} readOnly title="직원관리 상세에서 설정한 퇴근시간입니다." /></label>}
     </div>
+    {availability && <div className={`freepassAvailabilityBox ${availability.tone}`}>
+      <span className="freepassAvailabilityTitle">{availability.title}</span>
+      <strong>{availability.message}</strong>
+      <p>프리패스는 실제 사용 시간 기준 2시간 이전까지만 신청 가능합니다.</p>
+    </div>}
     {(requestType==='야근 적립'||requestType==='휴무출근 적립') && <div className="photoCaptureBox"><p className="muted">현장에서 직접 촬영한 타임스탬프 사진만 첨부해주세요. 최대 2장까지 가능하며, 최종 승인 시 사진 데이터는 즉시 삭제됩니다.</p><input type="file" accept="image/*" capture="environment" onChange={e=>onPhoto(e.target.files?.[0])}/>
       <div className="evidenceGrid">
         {photoItems.map((p,idx)=><div className="evidenceItem" key={idx}><img className="evidencePreview" src={p.data} alt={`증빙 ${idx+1}`} /><p>촬영일시: {freepassPhotoTimeLabel(p.captured_at)}</p><button type="button" onClick={()=>removePhoto(idx)}>삭제/재촬영</button></div>)}
@@ -1545,10 +1586,26 @@ function FreepassApprovalQueue({ user, mode }) {
               <td>{r.reason}</td>
               <td>{r.status}</td>
             </tr>)}
-            {loading&&<tr className="approvalEmptyRow"><td colSpan="7"><InlineLoadingState label="승인 대기 목록을 불러오는 중입니다" /></td></tr>}
-            {!loading&&!rows.length&&<tr className="approvalEmptyRow"><td colSpan="7"><div className="approvalEmptyText">승인 대기 건이 없습니다.</div></td></tr>}
+            {loading&&<tr className="approvalEmptyRow"><td colSpan="7"><InlineLoadingState /></td></tr>}
+            {!loading&&!rows.length&&<tr className="approvalEmptyRow"><td colSpan="7"><EmptyStateText>승인 대기 건이 없습니다.</EmptyStateText></td></tr>}
           </tbody>
         </table>
+      </div>
+
+      <div className="mobileCardList freepassMobileApprovalList">
+        {loading && <InlineLoadingState />}
+        {!loading && rows.map(r => (
+          <MobileInfoCard
+            key={r.id}
+            title={r.employee_name}
+            subtitle={`${r.employee_store || '-'} · ${displayRequestType(r)} ${r.use_type || ''}`}
+            meta={[r.request_date, `${r.hours}시간`, r.reason || '-']}
+            status={pushStatusLabel(r.status)}
+            badgeClass={pushStatusClass(r.status)}
+            onClick={() => setSelected(r)}
+          />
+        ))}
+        {!loading && !rows.length && <EmptyStateText>승인 대기 건이 없습니다.</EmptyStateText>}
       </div>
 
       {selected && createPortal(<div className="modalBg freepassApprovalModalBg">
@@ -1677,7 +1734,7 @@ function FreepassLogTab({ user }) {
       <table className="freepassLogTable">
         <thead><tr><th>유형</th><th>시간</th><th>요청일시</th><th>실제일</th><th>매장</th><th>직원</th><th>내용</th><th>처리자</th></tr></thead>
         <tbody>
-          {loading && <tr><td colSpan="8"><InlineLoadingState label="프리패스 로그를 불러오는 중입니다" /></td></tr>}
+          {loading && <tr><td colSpan="8"><InlineLoadingState /></td></tr>}
             {!loading && filtered.map(r=><tr key={r.id}>
             <td>{r.type}</td>
             <td>{freepassLedgerSignedHours(r)}시간</td>
@@ -1691,6 +1748,20 @@ function FreepassLogTab({ user }) {
           {!loading && !filtered.length && <tr><td colSpan="8" className="muted">표시할 로그가 없습니다.</td></tr>}
         </tbody>
       </table>
+      <div className="mobileCardList freepassMobileLogList">
+        {loading && <InlineLoadingState />}
+        {!loading && filtered.map(r => (
+          <MobileInfoCard
+            key={r.id}
+            title={`${r.employee || '-'} · ${r.type}`}
+            subtitle={`${r.store || '-'} · ${freepassLedgerSignedHours(r)}시간`}
+            meta={[r.requestedAt || formatKST(r.at), r.actualDate || '-', r.detail]}
+            status={r.source}
+            badgeClass="finalWaiting"
+          />
+        ))}
+        {!loading && !filtered.length && <EmptyStateText>표시할 로그가 없습니다.</EmptyStateText>}
+      </div>
     </div>
   );
 }
@@ -1768,7 +1839,7 @@ function FreepassAdminAdjust({ user }) {
     if(!employeeName) return alert('직원을 선택해주세요.');
     if(!reason.trim()) return alert('사유를 입력해주세요.');
     const emp=employees.find(e=>e.name===employeeName);
-    const value=type==='차감'?-Math.abs(Number(hours)):Math.abs(Number(hours));
+    const value=(type==='차감'||type==='사용처리')?-Math.abs(Number(hours)):Math.abs(Number(hours));
     try{
       const {error}=await supabase.from('freepass_ledger').insert({employee_id:emp?.id||null,employee_name:employeeName,employee_store:emp?.store_name||'',type,hours:value,reason,effective_date:todayLocalISO(),created_by:user.name});
       if(error) throw error;
@@ -1797,7 +1868,7 @@ function FreepassAdminAdjust({ user }) {
       const rows=selected.map(({emp,row})=>{
         const t=bulkIndividual ? (row.type||bulkType||'적립') : bulkType;
         const h=Math.abs(Number(bulkIndividual ? row.hours : bulkHours));
-        return {employee_id:emp.id||null,employee_name:emp.name,employee_store:emp.store_name||'',type:t,hours:t==='차감'?-h:h,reason:bulkReason,effective_date:todayLocalISO(),created_by:user.name};
+        return {employee_id:emp.id||null,employee_name:emp.name,employee_store:emp.store_name||'',type:t,hours:(t==='차감'||t==='사용처리')?-h:h,reason:bulkReason,effective_date:todayLocalISO(),created_by:user.name};
       });
       const {error}=await supabase.from('freepass_ledger').insert(rows);
       if(error) throw error;
@@ -1813,13 +1884,13 @@ function FreepassAdminAdjust({ user }) {
   return (
     <div>
       <div className="sectionCard">
-        <h3>개별 적립/차감</h3>
+        <h3>개별 적립/차감/사용처리</h3>
         <div className="formGrid">
           <select value={employeeName} onChange={e=>setEmployeeName(e.target.value)}>
             <option value="">직원 선택</option>
             {employees.map(e=><option key={e.id||e.name} value={e.name}>{e.store_name} · {e.name}</option>)}
           </select>
-          <select value={type} onChange={e=>setType(e.target.value)}><option>적립</option><option>차감</option></select>
+          <select value={type} onChange={e=>setType(e.target.value)}><option>적립</option><option>차감</option><option>사용처리</option></select>
           <input type="number" min="1" step="1" value={hours} onChange={e=>setHours(e.target.value)}/>
         </div>
         <textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="사유 입력"/>
@@ -1827,8 +1898,8 @@ function FreepassAdminAdjust({ user }) {
       </div>
 
       <div className="sectionCard">
-        <h3>전직원 일괄 적립/차감</h3>
-        <p className="muted">직원을 체크하고 지급/차감 시간과 사유를 입력하면 한 번에 처리됩니다. 직원 순서는 로그인 화면과 동일합니다.</p>
+        <h3>전직원 일괄 적립/차감/사용처리</h3>
+        <p className="muted">직원을 체크하고 적립/차감/사용처리 시간과 사유를 입력하면 한 번에 처리됩니다. 직원 순서는 로그인 화면과 동일합니다.</p>
         <div className="bulkControlPanel">
           <div className="bulkActions">
             <button type="button" onClick={()=>selectAllBulk(true)}>전체 선택</button>
@@ -1836,7 +1907,7 @@ function FreepassAdminAdjust({ user }) {
           </div>
           <div className="bulkCommonInputs">
             <label>공통 구분
-              <select value={bulkType} onChange={e=>setBulkType(e.target.value)}><option>적립</option><option>차감</option></select>
+              <select value={bulkType} onChange={e=>setBulkType(e.target.value)}><option>적립</option><option>차감</option><option>사용처리</option></select>
             </label>
             <label>공통 시간
               <input type="number" min="1" step="1" value={bulkHours} onChange={e=>setBulkHours(e.target.value)} />
@@ -1851,15 +1922,15 @@ function FreepassAdminAdjust({ user }) {
         <table className="freepassBulkTable compactFreepassTable">
           <thead><tr><th>선택</th><th>매장</th><th>직원</th><th>권한</th>{bulkIndividual && <><th>구분</th><th>시간</th></>}</tr></thead>
           <tbody>
-            {loading && <tr className="approvalEmptyRow"><td colSpan={bulkIndividual ? 6 : 4}><InlineLoadingState label="직원 목록을 불러오는 중입니다" /></td></tr>}
-            {!loading && !employees.length && <tr className="approvalEmptyRow"><td colSpan={bulkIndividual ? 6 : 4}><div className="freepassStateBox">표시할 직원이 없습니다.</div></td></tr>}
+            {loading && <tr className="approvalEmptyRow"><td colSpan={bulkIndividual ? 6 : 4}><InlineLoadingState /></td></tr>}
+            {!loading && !employees.length && <tr className="approvalEmptyRow"><td colSpan={bulkIndividual ? 6 : 4}><EmptyStateText>표시할 직원이 없습니다.</EmptyStateText></td></tr>}
             {!loading && employees.map(emp=>{
               const key=emp.id||emp.name; const row=bulkRows[key]||{};
               return <tr key={key}>
                 <td><input type="checkbox" checked={!!row.checked} onChange={e=>updateBulkRow(key,{checked:e.target.checked})}/></td>
                 <td>{emp.store_name}</td><td>{emp.name}</td><td>{emp.role||'직원'}</td>
                 {bulkIndividual && <>
-                  <td><select value={row.type||bulkType} onChange={e=>updateBulkRow(key,{type:e.target.value})}><option>적립</option><option>차감</option></select></td>
+                  <td><select value={row.type||bulkType} onChange={e=>updateBulkRow(key,{type:e.target.value})}><option>적립</option><option>차감</option><option>사용처리</option></select></td>
                   <td><input type="number" min="0" step="1" value={row.hours??''} placeholder={String(bulkHours)} onChange={e=>updateBulkRow(key,{hours:e.target.value})}/></td>
                 </>}
               </tr>
@@ -1930,10 +2001,30 @@ function FreepassStoreOverview({ user }) {
               </tr>
             );
           })}
-          {loading && <tr><td colSpan="5"><InlineLoadingState label="프리패스 현황을 불러오는 중입니다" /></td></tr>}
-          {!loading && !rows.length && <tr className="approvalEmptyRow"><td colSpan="5"><div className="freepassStateBox">표시할 직원이 없습니다.</div></td></tr>}
+          {loading && <tr><td colSpan="5"><InlineLoadingState /></td></tr>}
+          {!loading && !rows.length && <tr className="approvalEmptyRow"><td colSpan="5"><EmptyStateText>표시할 직원이 없습니다.</EmptyStateText></td></tr>}
         </tbody>
       </table>
+
+      <div className="mobileCardList freepassMobileOverviewList">
+        {loading && <InlineLoadingState />}
+        {!loading && rows.map(emp => {
+          const balance = freepassBalanceOf(ledger, emp.name);
+          const used = freepassUsedInMonth(ledger, emp.name);
+          return (
+            <MobileInfoCard
+              key={emp.id || emp.name}
+              title={emp.name}
+              subtitle={`${emp.store_name || '-'} · ${emp.role || '직원'}`}
+              meta={[`잔여 ${balance}시간`, `이번달 사용 ${used}시간`]}
+              status={`${balance}시간`}
+              badgeClass={balance < 0 ? 'rejected' : balance === 0 ? 'waiting' : 'finalWaiting'}
+              onClick={() => setSelected(emp)}
+            />
+          );
+        })}
+        {!loading && !rows.length && <EmptyStateText>표시할 직원이 없습니다.</EmptyStateText>}
+      </div>
 
       {selected && (
         <div className="modalBg freepassHistoryModalBg">
@@ -2856,8 +2947,28 @@ function diffDays(dateText, baseText = todayLocalISO()) {
 
 
 
-function InlineLoadingState({ label = '데이터를 불러오는 중입니다' }) {
-  return <div className="inlineLoadingState"><span className="loadingDot" />{label}</div>;
+function InlineLoadingState({ label = '로딩 중' }) {
+  return <div className="inlineLoadingState"><span className="loadingDot" /><span className="inlineLoadingText">{label}</span></div>;
+}
+
+function EmptyStateText({ children }) {
+  return <div className="freepassStateBox">{children}</div>;
+}
+
+function MobileInfoCard({ title, subtitle, meta = [], status, badgeClass = '', onClick, children }) {
+  return (
+    <button type="button" className="mobileInfoCard" onClick={onClick}>
+      <div className="mobileInfoCardMain">
+        <div>
+          <strong>{title}</strong>
+          {subtitle && <p>{subtitle}</p>}
+          {meta.filter(Boolean).map((m, idx) => <span key={idx}>{m}</span>)}
+        </div>
+        {status && <em className={`requestStatusBadge ${badgeClass}`}>{status}</em>}
+      </div>
+      {children && <div className="mobileInfoCardExtra">{children}</div>}
+    </button>
+  );
 }
 
 function useModalBodyScrollLock() {
