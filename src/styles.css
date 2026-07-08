@@ -9215,3 +9215,24 @@ select{
     overflow:hidden !important;
   }
 }
+
+/* V29.34 freepass availability detail: clear personal timeline, no clipping */
+.freepassAvailabilityDetail{
+  grid-column:1 / -1;
+  display:grid;
+  gap:3px;
+  min-width:0;
+}
+.freepassAvailabilityDetail p{
+  margin:0 !important;
+  color:#475569 !important;
+  font-size:12px !important;
+  line-height:1.35 !important;
+  word-break:keep-all !important;
+  overflow-wrap:normal !important;
+}
+@media(max-width:768px){
+  .freepassAvailabilityDetail p{
+    white-space:normal !important;
+  }
+}

@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v29.33-20260708171000';
+const APP_BUILD_VERSION = 'v29.34-20260708173500';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -595,33 +595,65 @@ function formatTimeHHMM(date) {
   if (!date || Number.isNaN(date.getTime())) return '';
   return `${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
 }
-function freepassUseAvailability({ requestType, useType, requestDate, hours, employeeEndTime }) {
+function makeLocalDateTime(dateText, timeText = '00:00') {
+  const safeDate = String(dateText || todayLocalISO()).slice(0, 10);
+  const safeTime = normalizeWorkEndTime(timeText || '00:00');
+  const [hh, mm] = safeTime.split(':').map(Number);
+  const d = new Date(`${safeDate}T00:00:00`);
+  d.setHours(hh || 0, mm || 0, 0, 0);
+  return d;
+}
+function freepassUseTimeline({ requestDate, hours, employeeEndTime }) {
+  const h = Number(hours || 0);
+  const endTime = normalizeWorkEndTime(employeeEndTime || '20:00');
+  const normalEndTime = makeLocalDateTime(requestDate, endTime);
+  const actualLeaveTime = new Date(normalEndTime.getTime() - h * 60 * 60 * 1000);
+  const deadline = new Date(actualLeaveTime.getTime() - 2 * 60 * 60 * 1000);
+  return {
+    employeeEndTime: endTime,
+    normalEndTime,
+    actualLeaveTime,
+    deadline,
+    normalEndLabel: formatTimeHHMM(normalEndTime),
+    actualLeaveLabel: formatTimeHHMM(actualLeaveTime),
+    deadlineLabel: formatTimeHHMM(deadline)
+  };
+}
+function freepassUseAvailability({ userName = '', requestType, useType, requestDate, hours, employeeEndTime }) {
   if (requestType !== '사용' || !requestDate) return null;
   const h = Number(hours || 0);
   if (!h || h <= 0) return null;
   const now = new Date();
-  const requestDay = new Date(`${requestDate}T00:00:00`);
-  let deadline = null;
+
   if (useType === '오전 늦게 출근') {
-    deadline = new Date(`${requestDate}T01:00:00`);
-  } else if (useType === '오후 일찍 퇴근') {
-    const endTime = normalizeWorkEndTime(employeeEndTime || '20:00');
-    const [hh, mm] = String(endTime).split(':').map(Number);
-    const normalEndTime = new Date(requestDay);
-    normalEndTime.setHours(hh || 20, mm || 0, 0, 0);
-    const actualLeaveTime = new Date(normalEndTime);
-    actualLeaveTime.setHours(actualLeaveTime.getHours() - h);
-    deadline = new Date(actualLeaveTime);
-    deadline.setHours(deadline.getHours() - 2);
+    const deadline = makeLocalDateTime(requestDate, '01:00');
+    const available = now <= deadline;
+    return {
+      available,
+      title: available ? '신청 가능 시간' : '신청 불가 시간',
+      message: available ? '사용일 오전 1시까지 신청 가능합니다.' : '사용일 오전 1시가 지나 신청할 수 없습니다.',
+      detailLines: [`${userName || '본인'}님 기준`, '오전 늦게 출근은 사용일 오전 1시까지 신청 가능합니다.'],
+      tone: available ? 'available' : 'unavailable'
+    };
   }
-  if (!deadline) return null;
-  const available = now <= deadline;
-  return {
-    available,
-    title: available ? '신청 가능 시간' : '신청 불가 시간',
-    message: available ? `${formatTimeHHMM(deadline)}까지 신청 가능합니다.` : '신청 가능 시간이 지났습니다.',
-    tone: available ? 'available' : 'unavailable'
-  };
+
+  if (useType === '오후 일찍 퇴근') {
+    const timeline = freepassUseTimeline({ requestDate, hours: h, employeeEndTime });
+    const available = now <= timeline.deadline;
+    return {
+      available,
+      title: available ? '신청 가능 시간' : '신청 불가 시간',
+      message: available ? `${timeline.deadlineLabel}까지 신청 가능합니다.` : `${timeline.deadlineLabel}이 지나 신청할 수 없습니다.`,
+      detailLines: [
+        `${userName || '본인'}님 기준 퇴근 ${timeline.normalEndLabel}`,
+        `${h}시간 사용 시 ${timeline.actualLeaveLabel} 퇴근`,
+        `신청 가능 시간은 ${timeline.deadlineLabel}까지입니다.`
+      ],
+      tone: available ? 'available' : 'unavailable'
+    };
+  }
+
+  return null;
 }
 
 function freepassPhotoTimeLabel(iso) {
@@ -653,32 +685,21 @@ function validateFreepassRequest({ requestType, useType, requestDate, hours, use
   }
 
   const now = new Date();
-  const requestDay = new Date(`${requestDate}T00:00:00`);
 
   if (requestType === '사용' && useType === '오전 늦게 출근') {
-    const deadline = new Date(`${requestDate}T01:00:00`);
-    if (now > deadline) return '오전 프리패스는 사용일 오전 1시 전까지만 신청 가능합니다.';
+    const deadline = makeLocalDateTime(requestDate, '01:00');
+    if (now > deadline) return '오전 프리패스는 사용일 오전 1시까지 신청 가능합니다.';
   }
 
   if (requestType === '사용' && useType === '오후 일찍 퇴근') {
-    const endTime = normalizeWorkEndTime(useStartTime || '20:00');
-    const [hh, mm] = String(endTime).split(':').map(Number);
+    const timeline = freepassUseTimeline({ requestDate, hours: h, employeeEndTime: useStartTime || '20:00' });
 
-    const normalEndTime = new Date(requestDay);
-    normalEndTime.setHours(hh || 20, mm || 0, 0, 0);
-
-    const actualLeaveTime = new Date(normalEndTime);
-    actualLeaveTime.setHours(actualLeaveTime.getHours() - h);
-
-    const deadline = new Date(actualLeaveTime);
-    deadline.setHours(deadline.getHours() - 2);
-
-    if (now > deadline) {
-      const deadlineLabel = `${String(deadline.getHours()).padStart(2,'0')}:${String(deadline.getMinutes()).padStart(2,'0')}`;
+    if (now > timeline.deadline) {
       return `신청 가능 시간이 지났습니다.
 
-오후 프리패스는 실제 사용 시간 기준 2시간 이전까지만 신청 가능합니다.
-신청 가능 시간: ${deadlineLabel}까지`;
+기준 퇴근 ${timeline.normalEndLabel}
+${h}시간 사용 시 ${timeline.actualLeaveLabel} 퇴근
+신청 가능 시간은 ${timeline.deadlineLabel}까지입니다.`;
     }
   }
 
@@ -1119,9 +1140,28 @@ function FreepassRequestForm({ user }) {
   const [requests,setRequests]=useState([]);
   const [busy,setBusy]=useState(false);
   const [monthlyLimit,setMonthlyLimit]=useState(10);
-  const employeeEndTime = employeeWorkEndTime(user);
-  const availability = freepassUseAvailability({ requestType, useType, requestDate, hours: requestType === '월차 전환' ? 10 : hours, employeeEndTime });
-  useEffect(()=>{ supabase.from('freepass_ledger').select('*').then(({data})=>setLedger(data||[])); supabase.from('freepass_requests').select('*').eq('employee_name', user.name).then(({data})=>setRequests(data||[])); getFreepassMonthlyLimit().then(setMonthlyLimit); },[]);
+  const [employeeProfile,setEmployeeProfile]=useState(user);
+  const employeeEndTime = employeeWorkEndTime(employeeProfile || user);
+  const availability = freepassUseAvailability({ userName:user.name, requestType, useType, requestDate, hours: requestType === '월차 전환' ? 10 : hours, employeeEndTime });
+  useEffect(()=>{
+    supabase.from('freepass_ledger').select('*').then(({data})=>setLedger(data||[]));
+    supabase.from('freepass_requests').select('*').eq('employee_name', user.name).then(({data})=>setRequests(data||[]));
+    getFreepassMonthlyLimit().then(setMonthlyLimit);
+    loadEmployeeProfile();
+  },[user?.id,user?.name]);
+
+  async function loadEmployeeProfile(){
+    try{
+      let query = supabase.from('employees').select('*');
+      if(user?.id) query = query.eq('id', user.id);
+      else query = query.eq('name', user.name);
+      const {data,error}=await query.maybeSingle();
+      if(error) throw error;
+      if(data) setEmployeeProfile(data);
+    }catch(e){
+      console.warn('employee profile refresh skipped', e?.message || e);
+    }
+  }
   async function onPhoto(file){
     if(!file) return;
     if(photoItems.length >= 2) return alert('사진은 최대 2장까지 첨부 가능합니다.');
@@ -1182,7 +1222,9 @@ function FreepassRequestForm({ user }) {
     {availability && <div className={`freepassAvailabilityBox ${availability.tone}`}>
       <span className="freepassAvailabilityTitle">{availability.title}</span>
       <strong>{availability.message}</strong>
-      <p>프리패스는 실제 사용 시간 기준 2시간 이전까지만 신청 가능합니다.</p>
+      <div className="freepassAvailabilityDetail">
+        {availability.detailLines?.map((line, idx)=><p key={idx}>{line}</p>)}
+      </div>
     </div>}
     {(requestType==='야근 적립'||requestType==='휴무출근 적립') && <div className="photoCaptureBox"><p className="muted">현장에서 직접 촬영한 타임스탬프 사진만 첨부해주세요. 최대 2장까지 가능하며, 최종 승인 시 사진 데이터는 즉시 삭제됩니다.</p><input type="file" accept="image/*" capture="environment" onChange={e=>onPhoto(e.target.files?.[0])}/>
       <div className="evidenceGrid">
