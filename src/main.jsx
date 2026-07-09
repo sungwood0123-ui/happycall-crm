@@ -5,33 +5,30 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'v29.38-20260709021000';
+const APP_BUILD_VERSION = 'v29.40-20260709033000';
 
 
-function parseAppVersion(versionText) {
-  const text = String(versionText || '').trim();
-  const match = text.match(/v?(\d+)\.(\d+)(?:-(\d+))?/i);
-  if (!match) return null;
+function parseAppVersion(value) {
+  const text = String(value || '').trim();
+  const versionMatch = text.match(/v?(\d+)\.(\d+)(?:\.(\d+))?/i);
+  const stampMatch = text.match(/-(\d{8,})/);
+  if (!versionMatch) return { major: 0, minor: 0, patch: 0, stamp: 0 };
   return {
-    major: Number(match[1] || 0),
-    minor: Number(match[2] || 0),
-    build: Number(match[3] || 0),
-    raw: text
+    major: Number(versionMatch[1] || 0),
+    minor: Number(versionMatch[2] || 0),
+    patch: Number(versionMatch[3] || 0),
+    stamp: Number(stampMatch?.[1] || 0)
   };
 }
 
 function compareAppVersion(a, b) {
-  const va = parseAppVersion(a);
-  const vb = parseAppVersion(b);
-  if (!va || !vb) return String(a || '').localeCompare(String(b || ''));
-  if (va.major !== vb.major) return va.major - vb.major;
-  if (va.minor !== vb.minor) return va.minor - vb.minor;
-  return va.build - vb.build;
-}
-
-function isNewerVersion(remoteVersion, currentVersion) {
-  if (!remoteVersion || !currentVersion) return false;
-  return compareAppVersion(remoteVersion, currentVersion) > 0;
+  const x = parseAppVersion(a);
+  const y = parseAppVersion(b);
+  for (const key of ['major', 'minor', 'patch', 'stamp']) {
+    if (x[key] > y[key]) return 1;
+    if (x[key] < y[key]) return -1;
+  }
+  return 0;
 }
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -754,18 +751,18 @@ function UpdateNotice({ user }) {
         const data = await res.json();
         if (!alive) return;
 
-        const remoteVersion = data.version || '';
-        // V29.38: 원격 version.json이 현재 앱보다 진짜 최신일 때만 업데이트 팝업 표시.
-        // 낮은 버전/캐시된 version.json이 내려와도 팝업을 띄우지 않는다.
-        if (isNewerVersion(remoteVersion, APP_BUILD_VERSION)) {
-          setNextVersion(remoteVersion);
+        if (data.version && compareAppVersion(data.version, APP_BUILD_VERSION) > 0) {
+          const seenKey = `sechan_update_seen_${data.version}`;
+          if (localStorage.getItem(seenKey) === '1') {
+            setHasUpdate(false);
+            return;
+          }
+          setNextVersion(data.version);
           // latestChanges only: 누적 변경내역이 아니라 이번 배포 변경분만 표시
           setChanges(filterChangesByRole(data.latestChanges || data.changes || []));
           setHasUpdate(true);
         } else {
           setHasUpdate(false);
-          setNextVersion('');
-          setChanges([]);
         }
       } catch (e) {}
     }
@@ -795,6 +792,8 @@ function UpdateNotice({ user }) {
 
   async function forceRefresh() {
     try {
+      if (nextVersion) localStorage.setItem(`sechan_update_seen_${nextVersion}`, '1');
+      setHasUpdate(false);
       if ('caches' in window) {
         const keys = await caches.keys();
         await Promise.all(keys.map(key => caches.delete(key)));
@@ -822,7 +821,7 @@ function UpdateNotice({ user }) {
         )}
 
         <p className="muted">현재 버전: {APP_BUILD_VERSION}<br />최신 버전: {nextVersion}</p>
-        <button className="primary" onClick={forceRefresh}>강제 새로고침</button>
+        <button className="primary" onClick={forceRefresh}>확인</button>
       </div>
     </div>
   );
