@@ -9451,3 +9451,88 @@ select{
     box-sizing:border-box !important;
   }
 }
+
+/* V29.38 공통 팝업 안전화 + 배경 스크롤 잠금 */
+html.modal-open,
+body.modal-open{
+  overflow:hidden !important;
+  overscroll-behavior:none !important;
+  touch-action:none !important;
+}
+
+.modalBg{
+  position:fixed !important;
+  inset:0 !important;
+  z-index:2147483000 !important;
+  display:flex !important;
+  align-items:flex-start !important;
+  justify-content:center !important;
+  padding-top:var(--modal-safe-top, 14px) !important;
+  padding-right:14px !important;
+  padding-bottom:max(14px, env(safe-area-inset-bottom, 0px)) !important;
+  padding-left:14px !important;
+  overflow:hidden !important;
+  overscroll-behavior:contain !important;
+}
+
+.modal{
+  width:min(860px, calc(100vw - 28px)) !important;
+  max-height:calc(100dvh - var(--modal-safe-top, 14px) - 14px) !important;
+  margin:0 auto !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  display:block !important;
+  -webkit-overflow-scrolling:touch !important;
+  overscroll-behavior:contain !important;
+}
+
+.modalHead{
+  position:sticky !important;
+  top:-1px !important;
+  z-index:20 !important;
+  background:#fff !important;
+  margin-top:0 !important;
+  padding-top:4px !important;
+}
+
+.modalHead button{
+  flex:0 0 auto !important;
+  white-space:nowrap !important;
+}
+
+/* 본문/하단 버튼이 분리된 팝업은 기존 구조를 유지 */
+.freepassApprovalModalBg .freepassApprovalModal{
+  display:flex !important;
+  flex-direction:column !important;
+  height:auto !important;
+  max-height:calc(100dvh - var(--modal-safe-top, 14px) - 14px) !important;
+  overflow:hidden !important;
+}
+.freepassApprovalModalBg .freepassApprovalModalBody{
+  flex:1 1 auto !important;
+  min-height:0 !important;
+  overflow-y:auto !important;
+  overscroll-behavior:contain !important;
+}
+.freepassApprovalModalBg .modalHead{
+  position:relative !important;
+  top:auto !important;
+}
+
+@media(max-width:768px){
+  .modalBg{
+    padding-right:10px !important;
+    padding-left:10px !important;
+    padding-bottom:max(10px, env(safe-area-inset-bottom, 0px)) !important;
+  }
+  .modal{
+    width:calc(100vw - 20px) !important;
+    max-height:calc(100dvh - var(--modal-safe-top, 12px) - 10px) !important;
+  }
+  .modalHead h2{
+    min-width:0 !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+    white-space:nowrap !important;
+  }
+}

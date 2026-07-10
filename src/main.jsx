@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'V29.37';
+const APP_BUILD_VERSION = 'V29.38';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -128,7 +128,78 @@ function applyMobileTableLabels() {
   } catch (e) {}
 }
 
+
+function useGlobalModalSafety() {
+  useEffect(() => {
+    let locked = false;
+    let savedScrollY = 0;
+
+    const getSafeTop = () => {
+      const candidates = [
+        document.querySelector('.app header'),
+        document.querySelector('.app nav')
+      ].filter(Boolean);
+      let bottom = 0;
+      candidates.forEach((el) => {
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        const isFixedLike = ['fixed', 'sticky'].includes(style.position) && rect.bottom > 0;
+        if (isFixedLike) bottom = Math.max(bottom, rect.bottom);
+      });
+      const maxAllowed = Math.round(window.innerHeight * 0.42);
+      return Math.max(12, Math.min(Math.round(bottom + 10), maxAllowed));
+    };
+
+    const lockBody = () => {
+      if (locked) return;
+      locked = true;
+      savedScrollY = window.scrollY || window.pageYOffset || 0;
+      document.documentElement.classList.add('modal-open');
+      document.body.classList.add('modal-open');
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${savedScrollY}px`;
+      document.body.style.left = '0';
+      document.body.style.right = '0';
+      document.body.style.width = '100%';
+      document.documentElement.style.setProperty('--modal-safe-top', `${getSafeTop()}px`);
+    };
+
+    const unlockBody = () => {
+      if (!locked) return;
+      locked = false;
+      document.documentElement.classList.remove('modal-open');
+      document.body.classList.remove('modal-open');
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.left = '';
+      document.body.style.right = '';
+      document.body.style.width = '';
+      window.scrollTo(0, savedScrollY);
+    };
+
+    const sync = () => {
+      const hasModal = Boolean(document.querySelector('.modalBg'));
+      if (hasModal) lockBody();
+      else unlockBody();
+    };
+
+    const observer = new MutationObserver(sync);
+    observer.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('resize', sync);
+    window.addEventListener('orientationchange', sync);
+    sync();
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', sync);
+      window.removeEventListener('orientationchange', sync);
+      unlockBody();
+    };
+  }, []);
+}
+
 function App() {
+  useGlobalModalSafety();
   useEffect(() => { applyMobileTableLabels(); });
 
   const [user, setUser] = useState(() => {
@@ -1172,17 +1243,29 @@ function FreepassRequestForm({ user }) {
     if((requestType==='야근 적립'||requestType==='휴무출근 적립') && !photoItems.length) return alert('적립 신청은 타임스탬프 사진 직접 촬영이 필요합니다.');
     setBusy(true);
     try{
+      let employeeQuery = supabase.from('employees').select('*');
+      if(user?.id) employeeQuery = employeeQuery.eq('id', user.id);
+      else employeeQuery = employeeQuery.eq('name', user.name);
+      const {data:latestEmployee,error:employeeError}=await employeeQuery.maybeSingle();
+      if(employeeError) throw employeeError;
+      if(!latestEmployee) throw new Error('직원관리의 최신 직원 정보를 찾을 수 없습니다. 관리자에게 확인해주세요.');
+
+      const latestStore = normalizeOfficeStoreName(latestEmployee.store_name);
+      const skipManagerApproval = latestEmployee.role === '점장' || latestStore === '사무실';
+      const nextStatus = skipManagerApproval ? '최종승인대기' : '점장승인대기';
+      const nowIso = new Date().toISOString();
+
       const {error}=await supabase.from('freepass_requests').insert({
-        employee_id:user.id, employee_name:user.name, employee_store:user.store_name,
+        employee_id:latestEmployee.id, employee_name:latestEmployee.name, employee_store:latestEmployee.store_name,
         request_type:requestType, use_type:requestType==='사용'?useType:null,
-        request_date:requestDate, use_start_time:requestType==='사용' && useType==='오후 일찍 퇴근' ? employeeEndTime : (useStartTime||null), hours:Number(effectiveHours ?? hours),
+        request_date:requestDate, use_start_time:requestType==='사용' && useType==='오후 일찍 퇴근' ? employeeWorkEndTime(latestEmployee) : (useStartTime||null), hours:Number(effectiveHours ?? hours),
         reason, evidence_photo_data:(requestType==='야근 적립'||requestType==='휴무출근 적립')?JSON.stringify(photoItems):null,
-        status:(user.role==='점장'||user.role==='관리자'||user.role==='검수자'||normalizeOfficeStoreName(user.store_name)==='사무실')?'최종승인대기':'점장승인대기',
-        manager_status:(user.role==='점장'||user.role==='관리자'||user.role==='검수자'||normalizeOfficeStoreName(user.store_name)==='사무실')?'점장승인생략':'대기',
+        status:nextStatus,
+        manager_status:skipManagerApproval?'점장승인생략':'대기',
         final_status:'대기',
-        requested_at:new Date().toISOString(),
-        manager_approved_by:(user.role==='점장'||user.role==='관리자'||user.role==='검수자'||normalizeOfficeStoreName(user.store_name)==='사무실')?user.name:null,
-        manager_approved_at:(user.role==='점장'||user.role==='관리자'||user.role==='검수자'||normalizeOfficeStoreName(user.store_name)==='사무실')?new Date().toISOString():null
+        requested_at:nowIso,
+        manager_approved_by:skipManagerApproval?latestEmployee.name:null,
+        manager_approved_at:skipManagerApproval?nowIso:null
       });
       if(error) throw error;
       await writeAuditLog('프리패스신청','freepass_requests',user.name,user,`${requestType} ${hours}시간 / ${reason}`);
@@ -1465,15 +1548,16 @@ function FreepassApprovalQueue({ user, mode }) {
   async function load(){
     setLoading(true);
     try{
-      const {data,error}=await supabase.from('freepass_requests').select('*').order('requested_at',{ascending:false});
+      const targetStatus = mode === 'manager' ? '점장승인대기' : '최종승인대기';
+      let query = supabase
+        .from('freepass_requests')
+        .select('*')
+        .eq('status', targetStatus)
+        .order('requested_at',{ascending:false});
+      if(mode==='manager' && user.role==='점장') query = query.eq('employee_store', user.store_name);
+      const {data,error}=await query;
       if(error) throw error;
-      let list=data||[];
-      if(mode==='manager'){
-        list=list.filter(r=>r.status==='점장승인대기');
-        if(user.role==='점장') list=list.filter(r=>r.employee_store===user.store_name);
-      }
-      if(mode==='final') list=list.filter(r=>r.status==='최종승인대기');
-      setRows(list);
+      setRows(data||[]);
     }catch(e){
       askErrorReport({user,currentTab:'프리패스 승인',actionName:'승인 목록 조회',error:e});
     }finally{
