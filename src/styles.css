@@ -9259,3 +9259,195 @@ select{
     font-size:10px;
   }
 }
+
+/* =========================================================
+   V29.37 모바일 UI 통일
+   오류보고 / 감사로그 / 직원관리 / 프리패스 상세 / 공통 로딩
+   ========================================================= */
+.inlineLoadingState{
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  gap:9px !important;
+  width:auto !important;
+  max-width:100% !important;
+  min-height:44px !important;
+  padding:10px 14px !important;
+  border:1px solid #e5e7eb !important;
+  border-radius:12px !important;
+  background:#f8fafc !important;
+  white-space:nowrap !important;
+}
+.inlineLoadingText{
+  white-space:nowrap !important;
+  word-break:keep-all !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+}
+.loadingDot{
+  flex:0 0 8px !important;
+}
+.mobileCardList{display:none;}
+
+.auditDetailModalBg,
+.errorDetailModalBg{
+  position:fixed !important;
+  inset:0 !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  padding:14px !important;
+  z-index:10000 !important;
+  overflow:hidden !important;
+}
+.auditDetailModal,
+.errorDetailModal{
+  width:min(760px, calc(100vw - 28px)) !important;
+  max-height:calc(100dvh - 28px) !important;
+  display:flex !important;
+  flex-direction:column !important;
+  overflow:hidden !important;
+}
+.auditDetailBody,
+.errorDetailBody{
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  min-height:0 !important;
+  -webkit-overflow-scrolling:touch !important;
+}
+.auditDetailText{
+  padding:14px !important;
+  border:1px solid #e5e7eb !important;
+  border-radius:12px !important;
+  background:#f8fafc !important;
+  white-space:pre-wrap !important;
+  overflow-wrap:anywhere !important;
+}
+
+@media(max-width:768px){
+  .desktopEmployeeTableWrap,
+  .desktopErrorTableCard,
+  .desktopAuditTableCard,
+  .desktopFreepassHistoryTable{
+    display:none !important;
+  }
+  .mobileCardList{
+    display:grid !important;
+    gap:10px !important;
+    width:100% !important;
+    min-width:0 !important;
+  }
+  .mobileInfoCard{
+    width:100% !important;
+    min-width:0 !important;
+    box-sizing:border-box !important;
+    text-align:left !important;
+    overflow:hidden !important;
+  }
+  .mobileInfoCardMain{
+    gap:10px !important;
+    min-width:0 !important;
+  }
+  .mobileInfoCardMain > div{
+    min-width:0 !important;
+    flex:1 1 auto !important;
+  }
+  .mobileInfoCard strong,
+  .mobileInfoCard p,
+  .mobileInfoCard span{
+    white-space:normal !important;
+    word-break:keep-all !important;
+    overflow-wrap:anywhere !important;
+  }
+  .requestStatusBadge{
+    flex:0 0 auto !important;
+    align-self:center !important;
+    white-space:nowrap !important;
+  }
+
+  .employeeMobileList,
+  .errorMobileList,
+  .auditMobileList{
+    margin-top:12px !important;
+  }
+
+  .employeeAddGrid{
+    grid-template-columns:1fr !important;
+  }
+  .employeeBulkSaveBar{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:10px !important;
+  }
+
+  .errorDetailModal,
+  .auditDetailModal,
+  .freepassHistoryModal,
+  .employeeDetailModal{
+    width:calc(100vw - 20px) !important;
+    max-width:calc(100vw - 20px) !important;
+    max-height:calc(100dvh - 20px) !important;
+    border-radius:18px !important;
+    padding:14px !important;
+  }
+  .errorDetailModal .modalHead,
+  .auditDetailModal .modalHead,
+  .freepassHistoryModal .modalHead,
+  .employeeDetailModal .modalHead{
+    gap:10px !important;
+  }
+  .errorDetailModal .modalHead h2,
+  .auditDetailModal .modalHead h2,
+  .freepassHistoryModal .modalHead h2,
+  .employeeDetailModal .modalHead h2{
+    font-size:21px !important;
+    min-width:0 !important;
+  }
+  .errorDetailBody .infoGrid,
+  .auditDetailBody .infoGrid,
+  .freepassHistoryBody .infoGrid{
+    grid-template-columns:1fr 1fr !important;
+    gap:10px !important;
+  }
+
+  .freepassHistoryMobileList{display:grid !important;}
+  .freepassHistoryCard{
+    border:1px solid #e5e7eb !important;
+    border-radius:14px !important;
+    padding:13px !important;
+    background:#fff !important;
+    min-width:0 !important;
+  }
+  .freepassHistoryCardHead{
+    display:flex !important;
+    justify-content:space-between !important;
+    align-items:center !important;
+    gap:10px !important;
+    margin-bottom:8px !important;
+  }
+  .freepassHistoryCardHead strong{font-size:15px !important;}
+  .freepassHistoryCardHead span{font-weight:900 !important;white-space:nowrap !important;}
+  .freepassHistoryCardHead .positive{color:#155eef !important;}
+  .freepassHistoryCardHead .negative{color:#b42318 !important;}
+  .freepassHistoryCard p{
+    margin:3px 0 !important;
+    color:#64748b !important;
+    font-size:13px !important;
+    line-height:1.35 !important;
+  }
+  .freepassHistoryCard > div:last-child{
+    margin-top:8px !important;
+    padding-top:8px !important;
+    border-top:1px solid #eef2f7 !important;
+    font-size:14px !important;
+    line-height:1.45 !important;
+    overflow-wrap:anywhere !important;
+  }
+
+  .inlineLoadingState{
+    display:flex !important;
+    width:100% !important;
+    min-height:48px !important;
+    box-sizing:border-box !important;
+  }
+}

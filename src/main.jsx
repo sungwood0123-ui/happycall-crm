@@ -759,7 +759,6 @@ function isNewerVersion(latest, current) {
 }
 
 function UpdateNotice({ user, currentTab }) {
-  const ACK_KEY = 'sechan_acknowledged_app_version';
   const [hasUpdate, setHasUpdate] = useState(false);
   const [nextVersion, setNextVersion] = useState('');
   const [updating, setUpdating] = useState(false);
@@ -767,62 +766,31 @@ function UpdateNotice({ user, currentTab }) {
   useEffect(() => {
     let alive = true;
     let timer;
-    let retryTimer;
-    let inFlight = false;
-
-    function getAcknowledgedVersion() {
-      try { return localStorage.getItem(ACK_KEY) || ''; } catch { return ''; }
-    }
-
-    function requireAcknowledgement(version) {
-      if (!alive || !version) return;
-      setNextVersion(version);
-      setHasUpdate(true);
-    }
 
     async function checkVersion() {
-      if (inFlight || !navigator.onLine) return;
-      inFlight = true;
       try {
         const url = `/version.json?version_check=${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const res = await fetch(url, {
-          method: 'GET',
           cache: 'no-store',
-          credentials: 'same-origin',
           headers: {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache',
             'Expires': '0'
           }
         });
-        if (!res.ok) throw new Error(`version check failed: ${res.status}`);
+        if (!res.ok) return;
         const data = await res.json();
         if (!alive) return;
 
-        const latestVersion = String(data?.version || '').trim();
-        const acknowledgedVersion = getAcknowledgedVersion();
-
-        // 이미 최신 화면이 열렸더라도 이 기기에서 해당 버전을 확인하지 않았다면
-        // 반드시 한 번은 강제 새로고침 안내를 보여준다.
-        if (latestVersion && acknowledgedVersion !== latestVersion) {
-          requireAcknowledgement(latestVersion);
-          return;
-        }
-
-        // 현재 실행 중인 화면보다 서버 버전이 높다면 반드시 업데이트한다.
+        const latestVersion = data?.version || '';
         if (isNewerVersion(latestVersion, APP_BUILD_VERSION)) {
-          requireAcknowledgement(latestVersion);
-          return;
+          setNextVersion(latestVersion);
+          setHasUpdate(true);
+        } else {
+          setNextVersion('');
+          setHasUpdate(false);
         }
-
-        setNextVersion('');
-        setHasUpdate(false);
-      } catch (e) {
-        clearTimeout(retryTimer);
-        retryTimer = setTimeout(checkVersion, 5000);
-      } finally {
-        inFlight = false;
-      }
+      } catch (e) {}
     }
 
     function handleVisible() {
@@ -830,65 +798,54 @@ function UpdateNotice({ user, currentTab }) {
     }
 
     checkVersion();
-    timer = setInterval(checkVersion, 30 * 1000);
+    timer = setInterval(checkVersion, 2 * 60 * 1000);
     document.addEventListener('visibilitychange', handleVisible);
     window.addEventListener('focus', checkVersion);
     window.addEventListener('pageshow', checkVersion);
     window.addEventListener('online', checkVersion);
     window.addEventListener('popstate', checkVersion);
     window.addEventListener('hashchange', checkVersion);
+    window.addEventListener('click', checkVersion, { passive: true });
 
     return () => {
       alive = false;
       clearInterval(timer);
-      clearTimeout(retryTimer);
       document.removeEventListener('visibilitychange', handleVisible);
       window.removeEventListener('focus', checkVersion);
       window.removeEventListener('pageshow', checkVersion);
       window.removeEventListener('online', checkVersion);
       window.removeEventListener('popstate', checkVersion);
       window.removeEventListener('hashchange', checkVersion);
+      window.removeEventListener('click', checkVersion);
     };
   }, [user?.role, currentTab]);
 
   async function forceUpdateRefresh() {
     if (updating) return;
     setUpdating(true);
-    const targetVersion = nextVersion || APP_BUILD_VERSION;
-
     try {
-      // 이 버전의 강제 새로고침 안내를 확인했다는 기록을 먼저 남긴다.
-      // 새로고침 후 같은 팝업이 무한 반복되는 것을 막는다.
-      localStorage.setItem(ACK_KEY, targetVersion);
-      sessionStorage.clear();
-
+      try { localStorage.removeItem('sechan_dismissed_update_version'); } catch {}
+      try { sessionStorage.clear(); } catch {}
       if ('caches' in window) {
         const keys = await caches.keys();
         await Promise.all(keys.map(key => caches.delete(key)));
       }
-
-      if ('serviceWorker' in navigator) {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(registrations.map(reg => reg.update().catch(() => null)));
-      }
     } catch (e) {}
 
     const base = `${window.location.origin}${window.location.pathname}`;
-    const refreshUrl = `${base}?app_refresh=${Date.now()}&target=${encodeURIComponent(targetVersion)}`;
-    window.location.replace(refreshUrl);
+    window.location.replace(`${base}?app_refresh=${Date.now()}&target=${encodeURIComponent(nextVersion || 'latest')}`);
   }
 
   if (!hasUpdate) return null;
 
   return (
-    <div className="updateNoticeBg mandatoryUpdateBg" role="dialog" aria-modal="true" aria-label="업데이트 필요">
+    <div className="updateNoticeBg mandatoryUpdateBg">
       <div className="updateNoticeBox mandatoryUpdateBox">
-        <h2>업데이트가 필요합니다</h2>
-        <p>최신 버전을 사용하려면 새로고침이 필요합니다.</p>
+        <h2>새로운 버전이 있습니다</h2>
+        <p>안정적인 사용을 위해 최신 버전으로 새로고침해야 합니다.</p>
+        <p className="muted">현재 버전: {APP_BUILD_VERSION}<br />최신 버전: {nextVersion}</p>
         <div className="updateNoticeActions singleAction">
-          <button className="primary" onClick={forceUpdateRefresh} disabled={updating}>
-            {updating ? '새로고침 중...' : '최신 버전으로 새로고침'}
-          </button>
+          <button className="primary" onClick={forceUpdateRefresh} disabled={updating}>{updating ? '새로고침 중...' : '최신 버전으로 새로고침'}</button>
         </div>
       </div>
     </div>
@@ -1491,6 +1448,7 @@ function FreepassApprovalQueue({ user, mode }) {
   const [selected,setSelected]=useState(null);
   const [loading,setLoading]=useState(true);
   const [processingId,setProcessingId]=useState(null);
+  const [selectedLog, setSelectedLog] = useState(null);
 
   useEffect(()=>{load();},[mode]);
 
@@ -1712,6 +1670,7 @@ function FreepassLogTab({ user }) {
   const [typeFilter,setTypeFilter]=useState('전체');
   const [loading,setLoading]=useState(true);
   const [processingId,setProcessingId]=useState(null);
+  const [selectedLog, setSelectedLog] = useState(null);
 
   useEffect(()=>{ load(); },[]);
 
@@ -2016,6 +1975,7 @@ function FreepassStoreOverview({ user }) {
   const [requests,setRequests]=useState([]);
   const [loading,setLoading]=useState(true);
   const [processingId,setProcessingId]=useState(null);
+  const [selectedLog, setSelectedLog] = useState(null);
 
   useEffect(()=>{ load(); },[]);
 
@@ -2107,7 +2067,7 @@ function FreepassStoreOverview({ user }) {
             </section>
             <section>
               <h3>적립/사용/차감 이력</h3>
-              <div className="freepassHistoryTableScroll">
+              <div className="freepassHistoryTableScroll desktopFreepassHistoryTable">
               <table>
                 <thead><tr><th>구분</th><th>시간</th><th>요청일시</th><th>실제일</th><th>사유</th><th>처리자</th></tr></thead>
                 <tbody>
@@ -2124,6 +2084,23 @@ function FreepassStoreOverview({ user }) {
                   {!selectedRows.length && <tr><td colSpan="6" className="muted">프리패스 이력이 없습니다.</td></tr>}
                 </tbody>
               </table>
+              </div>
+              <div className="mobileCardList freepassHistoryMobileList">
+                {selectedRows.map(r => {
+                  const signedHours = freepassLedgerSignedHours(r);
+                  return (
+                    <div className="freepassHistoryCard" key={r.id}>
+                      <div className="freepassHistoryCardHead">
+                        <strong>{freepassTypeLabel(r.type)}</strong>
+                        <span className={signedHours < 0 ? 'negative' : 'positive'}>{signedHours > 0 ? `+${signedHours}` : signedHours}시간</span>
+                      </div>
+                      <p>{freepassRequestedDateTimeLabel(r, requestMap)}</p>
+                      <p>{freepassActualDateLabel(r)} · {r.created_by || '-'}</p>
+                      <div>{r.reason || '-'}</div>
+                    </div>
+                  );
+                })}
+                {!selectedRows.length && <EmptyStateText>프리패스 이력이 없습니다.</EmptyStateText>}
               </div>
             </section>
             </div>
@@ -2199,7 +2176,7 @@ function FreepassSemiannualReset({ user }) {
       <table className="freepassResetTable compactFreepassTable">
         <thead><tr><th>예외</th><th>매장</th><th>직원</th><th>현재 잔여</th><th>초기화 차감</th></tr></thead>
         <tbody>
-          {loading && <tr className="approvalEmptyRow"><td colSpan="5"><InlineLoadingState label="초기화 대상자를 불러오는 중입니다" /></td></tr>}
+          {loading && <tr className="approvalEmptyRow"><td colSpan="5"><InlineLoadingState /></td></tr>}
           {!loading && resetTargets.map(emp=>{
             const key=emp.id||emp.name;
             const except=!!exceptions[key];
@@ -3982,10 +3959,12 @@ function Employees({ user }) {
   const [detailTarget, setDetailTarget] = useState(null);
   const [reviewStoreTarget, setReviewStoreTarget] = useState(null);
   const [passwordTarget, setPasswordTarget] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
+    setLoading(true);
     const [{ data: empData, error: empError }, { data: storeData, error: storeError }] = await Promise.all([
       supabase.from('employees').select('*').order('name'),
       supabase.from('stores').select('*').order('name')
@@ -4013,6 +3992,7 @@ function Employees({ user }) {
     if (stores.length && !stores.some(s => s.name === form.store_name)) {
       setForm(prev => ({ ...prev, store_name: stores[0].name }));
     }
+    setLoading(false);
   }
 
   function setDraft(id, patch) {
@@ -4141,7 +4121,7 @@ function Employees({ user }) {
         <button className="primary" onClick={saveAllEmployees}>전체 변경사항 저장</button>
       </div>
 
-      <div className="sectionCard employeeTableWrap">
+      <div className="sectionCard employeeTableWrap desktopEmployeeTableWrap">
         <table className="employeeTable compactEmployeeTable">
           <thead>
             <tr>
@@ -4189,6 +4169,29 @@ function Employees({ user }) {
             })}
           </tbody>
         </table>
+      </div>
+
+      <div className="mobileCardList employeeMobileList">
+        {loading && <InlineLoadingState />}
+        {!loading && filteredRows.map(r => {
+          const d = drafts[r.id] || {};
+          const storeName = d.store_name ?? r.store_name ?? '-';
+          const roleName = d.role ?? r.role ?? '직원';
+          const statusName = d.status ?? r.status ?? '재직';
+          const assignmentName = (d.happycall_assignment_enabled ?? r.happycall_assignment_enabled) !== false ? '해피콜 배정' : '해피콜 미배정';
+          return (
+            <MobileInfoCard
+              key={r.id}
+              title={r.name}
+              subtitle={`${storeName} · ${roleName}`}
+              meta={[`${statusName} · ${assignmentName}`]}
+              status="상세"
+              badgeClass="finalWaiting"
+              onClick={() => setDetailTarget(r)}
+            />
+          );
+        })}
+        {!loading && !filteredRows.length && <EmptyStateText>표시할 직원이 없습니다.</EmptyStateText>}
       </div>
 
       <p className="muted">입사일, 퇴사일, 근무이력은 상세 버튼에서 관리합니다. 퇴사자는 로그인할 수 없습니다.</p>
@@ -4495,8 +4498,8 @@ function RefusedCustomersViewer() {
   return (
     <div>
       <h2>통화 불가 고객</h2>
-      <div className="sectionCard">
-        <table>
+      <div className="sectionCard desktopAuditTableCard">
+        <table className="auditLogsTable">
           <thead>
             <tr>
               <th>가입번호</th>
@@ -4646,7 +4649,7 @@ function SuggestionsPage({ user }) {
       </div>
 
       <div className="sectionCard suggestionListCard">
-        {loading && <InlineLoadingState label="건의/문의 내역을 불러오는 중입니다" />}
+        {loading && <InlineLoadingState />}
         {!loading && !filtered.length && <div className="emptyState">건의/문의 내역이 없습니다.</div>}
         {!loading && filtered.map(r => (
           <button key={r.id} type="button" className="suggestionCardItem" onClick={() => setSelected(r)}>
@@ -4772,7 +4775,7 @@ function ErrorReportsViewer({ user }) {
         <input placeholder="작업자/작업/가입번호/오류 검색" value={keyword} onChange={e=>setKeyword(e.target.value)} />
         <button onClick={() => { setStatusFilter('전체'); setKeyword(''); }}>초기화</button>
       </div>
-      <div className="sectionCard errorTableCard">
+      <div className="sectionCard errorTableCard desktopErrorTableCard">
         <div className="errorTableScroll">
         <table className="errorReportsTable">
           <thead>
@@ -4781,7 +4784,7 @@ function ErrorReportsViewer({ user }) {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan="9"><InlineLoadingState label="오류보고를 불러오는 중입니다" /></td></tr>}
+            {loading && <tr><td colSpan="9"><InlineLoadingState /></td></tr>}
             {!loading && filtered.map(r => (
               <tr key={r.id}>
                 <td>{formatKST(r.created_at)}</td><td>{r.occurrence_count || 1}</td>
@@ -4809,6 +4812,22 @@ function ErrorReportsViewer({ user }) {
           </tbody>
         </table>
         </div>
+      </div>
+
+      <div className="mobileCardList errorMobileList">
+        {loading && <InlineLoadingState />}
+        {!loading && filtered.map(r => (
+          <MobileInfoCard
+            key={r.id}
+            title={`${r.reporter_name || '-'} · ${r.action_name || '-'}`}
+            subtitle={`${r.reporter_store || '-'} · ${formatKST(r.created_at)}`}
+            meta={[r.current_tab || '-', r.error_message || '-']}
+            status={r.status || '접수'}
+            badgeClass={(r.status || '접수') === '해결완료' ? 'approved' : (r.status || '접수') === '보류' ? 'rejected' : 'waiting'}
+            onClick={() => setSelected(r)}
+          />
+        ))}
+        {!loading && !filtered.length && <EmptyStateText>오류보고가 없습니다.</EmptyStateText>}
       </div>
 
       {selected && <ErrorReportDetailModal row={selected} onClose={() => setSelected(null)} />}
@@ -4894,6 +4913,7 @@ function AuditLogsViewer() {
   const [keyword, setKeyword] = useState('');
   const [loading,setLoading]=useState(true);
   const [processingId,setProcessingId]=useState(null);
+  const [selectedLog, setSelectedLog] = useState(null);
 
   useEffect(() => { load(); }, []);
 
@@ -4942,7 +4962,7 @@ function AuditLogsViewer() {
             <tr><th>일시(KST)</th><th>작업자</th><th>작업</th><th>상세</th></tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan="4"><InlineLoadingState label="감사로그를 불러오는 중입니다" /></td></tr>}
+            {loading && <tr><td colSpan="4"><InlineLoadingState /></td></tr>}
             {!loading && filteredLogs.map(l => (
               <tr key={l.id}>
                 <td>{formatKST(l.created_at)}</td>
@@ -4955,6 +4975,39 @@ function AuditLogsViewer() {
           </tbody>
         </table>
       </div>
+
+      <div className="mobileCardList auditMobileList">
+        {loading && <InlineLoadingState />}
+        {!loading && filteredLogs.map(l => (
+          <MobileInfoCard
+            key={l.id}
+            title={`${l.actor_name || '-'} · ${l.action || '-'}`}
+            subtitle={formatKST(l.created_at)}
+            meta={[maskSensitiveAuditDetail(l.detail || `${l.target_type || ''} ${l.target_id || ''}`)]}
+            status="상세"
+            badgeClass="finalWaiting"
+            onClick={() => setSelectedLog(l)}
+          />
+        ))}
+        {!loading && !filteredLogs.length && <EmptyStateText>조건에 맞는 감사로그가 없습니다.</EmptyStateText>}
+      </div>
+
+      {selectedLog && (
+        <div className="modalBg auditDetailModalBg" onMouseDown={e => { if (e.target === e.currentTarget) setSelectedLog(null); }}>
+          <div className="modal auditDetailModal">
+            <div className="modalHead"><h2>감사로그 상세</h2><button onClick={() => setSelectedLog(null)}>닫기</button></div>
+            <div className="auditDetailBody">
+              <div className="infoGrid">
+                <p><b>일시</b><br />{formatKST(selectedLog.created_at)}</p>
+                <p><b>작업자</b><br />{selectedLog.actor_name || '-'}</p>
+                <p><b>작업</b><br />{selectedLog.action || '-'}</p>
+                <p><b>대상</b><br />{selectedLog.target_type || '-'} {selectedLog.target_id || ''}</p>
+              </div>
+              <section><h3>상세 내용</h3><div className="auditDetailText">{maskSensitiveAuditDetail(selectedLog.detail || '-')}</div></section>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
