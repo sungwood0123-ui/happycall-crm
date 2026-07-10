@@ -1,9 +1,17 @@
 {
-  "version": "V29.36",
+  "version": "V29.37",
   "latestChanges": [
     {
       "text": "업데이트 시스템 안정화",
-      "roles": ["전체"]
+      "roles": [
+        "전체"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "text": "업데이트 감지 및 강제 새로고침 안정화",
+      "children": []
     }
   ]
 }

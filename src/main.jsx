@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'V29.36';
+const APP_BUILD_VERSION = 'V29.37';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -759,6 +759,7 @@ function isNewerVersion(latest, current) {
 }
 
 function UpdateNotice({ user, currentTab }) {
+  const ACK_KEY = 'sechan_acknowledged_app_version';
   const [hasUpdate, setHasUpdate] = useState(false);
   const [nextVersion, setNextVersion] = useState('');
   const [updating, setUpdating] = useState(false);
@@ -766,31 +767,62 @@ function UpdateNotice({ user, currentTab }) {
   useEffect(() => {
     let alive = true;
     let timer;
+    let retryTimer;
+    let inFlight = false;
+
+    function getAcknowledgedVersion() {
+      try { return localStorage.getItem(ACK_KEY) || ''; } catch { return ''; }
+    }
+
+    function requireAcknowledgement(version) {
+      if (!alive || !version) return;
+      setNextVersion(version);
+      setHasUpdate(true);
+    }
 
     async function checkVersion() {
+      if (inFlight || !navigator.onLine) return;
+      inFlight = true;
       try {
         const url = `/version.json?version_check=${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const res = await fetch(url, {
+          method: 'GET',
           cache: 'no-store',
+          credentials: 'same-origin',
           headers: {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache',
             'Expires': '0'
           }
         });
-        if (!res.ok) return;
+        if (!res.ok) throw new Error(`version check failed: ${res.status}`);
         const data = await res.json();
         if (!alive) return;
 
-        const latestVersion = data?.version || '';
-        if (isNewerVersion(latestVersion, APP_BUILD_VERSION)) {
-          setNextVersion(latestVersion);
-          setHasUpdate(true);
-        } else {
-          setNextVersion('');
-          setHasUpdate(false);
+        const latestVersion = String(data?.version || '').trim();
+        const acknowledgedVersion = getAcknowledgedVersion();
+
+        // 이미 최신 화면이 열렸더라도 이 기기에서 해당 버전을 확인하지 않았다면
+        // 반드시 한 번은 강제 새로고침 안내를 보여준다.
+        if (latestVersion && acknowledgedVersion !== latestVersion) {
+          requireAcknowledgement(latestVersion);
+          return;
         }
-      } catch (e) {}
+
+        // 현재 실행 중인 화면보다 서버 버전이 높다면 반드시 업데이트한다.
+        if (isNewerVersion(latestVersion, APP_BUILD_VERSION)) {
+          requireAcknowledgement(latestVersion);
+          return;
+        }
+
+        setNextVersion('');
+        setHasUpdate(false);
+      } catch (e) {
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(checkVersion, 5000);
+      } finally {
+        inFlight = false;
+      }
     }
 
     function handleVisible() {
@@ -798,54 +830,65 @@ function UpdateNotice({ user, currentTab }) {
     }
 
     checkVersion();
-    timer = setInterval(checkVersion, 2 * 60 * 1000);
+    timer = setInterval(checkVersion, 30 * 1000);
     document.addEventListener('visibilitychange', handleVisible);
     window.addEventListener('focus', checkVersion);
     window.addEventListener('pageshow', checkVersion);
     window.addEventListener('online', checkVersion);
     window.addEventListener('popstate', checkVersion);
     window.addEventListener('hashchange', checkVersion);
-    window.addEventListener('click', checkVersion, { passive: true });
 
     return () => {
       alive = false;
       clearInterval(timer);
+      clearTimeout(retryTimer);
       document.removeEventListener('visibilitychange', handleVisible);
       window.removeEventListener('focus', checkVersion);
       window.removeEventListener('pageshow', checkVersion);
       window.removeEventListener('online', checkVersion);
       window.removeEventListener('popstate', checkVersion);
       window.removeEventListener('hashchange', checkVersion);
-      window.removeEventListener('click', checkVersion);
     };
   }, [user?.role, currentTab]);
 
   async function forceUpdateRefresh() {
     if (updating) return;
     setUpdating(true);
+    const targetVersion = nextVersion || APP_BUILD_VERSION;
+
     try {
-      try { localStorage.removeItem('sechan_dismissed_update_version'); } catch {}
-      try { sessionStorage.clear(); } catch {}
+      // 이 버전의 강제 새로고침 안내를 확인했다는 기록을 먼저 남긴다.
+      // 새로고침 후 같은 팝업이 무한 반복되는 것을 막는다.
+      localStorage.setItem(ACK_KEY, targetVersion);
+      sessionStorage.clear();
+
       if ('caches' in window) {
         const keys = await caches.keys();
         await Promise.all(keys.map(key => caches.delete(key)));
       }
+
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map(reg => reg.update().catch(() => null)));
+      }
     } catch (e) {}
 
     const base = `${window.location.origin}${window.location.pathname}`;
-    window.location.replace(`${base}?app_refresh=${Date.now()}&target=${encodeURIComponent(nextVersion || 'latest')}`);
+    const refreshUrl = `${base}?app_refresh=${Date.now()}&target=${encodeURIComponent(targetVersion)}`;
+    window.location.replace(refreshUrl);
   }
 
   if (!hasUpdate) return null;
 
   return (
-    <div className="updateNoticeBg mandatoryUpdateBg">
+    <div className="updateNoticeBg mandatoryUpdateBg" role="dialog" aria-modal="true" aria-label="업데이트 필요">
       <div className="updateNoticeBox mandatoryUpdateBox">
-        <h2>새로운 버전이 있습니다</h2>
-        <p>안정적인 사용을 위해 최신 버전으로 새로고침해야 합니다.</p>
-        <p className="muted">현재 버전: {APP_BUILD_VERSION}<br />최신 버전: {nextVersion}</p>
+        <h2>업데이트가 필요합니다</h2>
+        <p>최신 버전을 사용하려면 새로고침이 필요합니다.</p>
         <div className="updateNoticeActions singleAction">
-          <button className="primary" onClick={forceUpdateRefresh} disabled={updating}>{updating ? '새로고침 중...' : '최신 버전으로 새로고침'}</button>
+          <button className="primary" onClick={forceUpdateRefresh} disabled={updating}>
+            {updating ? '새로고침 중...' : '최신 버전으로 새로고침'}
+          </button>
         </div>
       </div>
     </div>
