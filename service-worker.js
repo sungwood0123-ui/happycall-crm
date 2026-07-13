@@ -1,9 +1,3 @@
-self.addEventListener('install', event => {
-  self.skipWaiting();
-});
-self.addEventListener('activate', event => {
-  event.waitUntil(self.clients.claim());
-});
 self.addEventListener('push', event => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { title:'세찬컴퍼니 인트라넷', body:event.data ? event.data.text() : '' }; }

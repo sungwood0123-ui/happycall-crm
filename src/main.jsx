@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'V29.42';
+const APP_BUILD_VERSION = 'V29.45';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -6164,8 +6164,6 @@ function RawUpload({ user }) {
   const [fileName, setFileName] = useState('');
   const [summary, setSummary] = useState(null);
   const [preview, setPreview] = useState([]);
-  const [diagnosticResult, setDiagnosticResult] = useState(null);
-  const [showDiagnosticDetails, setShowDiagnosticDetails] = useState(false);
   const [busy, setBusy] = useState(false);
 
   function excelDateToISO(value) {
@@ -6808,12 +6806,10 @@ function TargetGenerator({ user }) {
     );
   }
 
-  async function generateTargets(diagnosticOnly = false) {
+  async function generateTargets() {
     setBusy(true);
     setSummary(null);
     setPreview([]);
-    setDiagnosticResult(null);
-    setShowDiagnosticDetails(false);
 
     try {
       const [customers, employees, stores, histories, employeeHistories, refusedRows] = await Promise.all([
@@ -6847,28 +6843,6 @@ function TargetGenerator({ user }) {
         { days: 185, type: 'D_PLUS_185' }
       ];
 
-      const diagnosticData = {
-        selectedDate: targetDate,
-        lookupDates: Object.fromEntries(plusMap.map(p => [p.type, addDays(targetDate, -p.days)])),
-        rawCustomerCount: customers?.length || 0,
-        validCustomerCount: 0,
-        dPlusRawMatched: Object.fromEntries(plusMap.map(p => [p.type, 0])),
-        dPlusRefusedExcluded: Object.fromEntries(plusMap.map(p => [p.type, 0])),
-        dPlusCandidates: Object.fromEntries(plusMap.map(p => [p.type, 0])),
-        monthly: {
-          sameDayRaw: 0,
-          parityExcluded: 0,
-          refusedExcluded: 0,
-          dPlusSameMonthExcluded: 0,
-          candidates: 0
-        },
-        duplicateRemoved: 0,
-        unassigned: 0,
-        finalByType: {},
-        existingOnTargetDate: 0,
-        detailRows: []
-      };
-
       const targetMonthText = targetMonth(targetDate);
       const targetDay = dayOfMonth(targetDate);
 
@@ -6877,37 +6851,14 @@ function TargetGenerator({ user }) {
 
       (customers || []).forEach(c => {
         if (!c.open_date || !c.join_no) return;
-        diagnosticData.validCustomerCount += 1;
         plusMap.forEach(p => {
+          if (shouldSkipByRefusedCustomer(c, refusedMap, p.type)) return;
           const plusDate = addDays(c.open_date, p.days);
           const isSaturdayD1MondayCorrection = p.days === 1 && isMondayLocal(targetDate) && isSaturdayLocal(c.open_date) && addDays(c.open_date, 2) === targetDate;
-          const isTargetMatch = plusDate === targetDate || isSaturdayD1MondayCorrection;
-          const isRefused = shouldSkipByRefusedCustomer(c, refusedMap, p.type);
-
-          if (isTargetMatch) {
-            diagnosticData.dPlusRawMatched[p.type] += 1;
-            if (isRefused) {
-              diagnosticData.dPlusRefusedExcluded[p.type] += 1;
-              diagnosticData.detailRows.push({
-                join_no: c.join_no,
-                customer_name: c.customer_name,
-                open_date: c.open_date,
-                call_type: p.type,
-                store_name: findCustomerStoreName(c),
-                seller_name: findCustomerSellerName(c),
-                result: '제외',
-                reason: '통화 불가 고객'
-              });
-            }
-          }
-
-          if (isRefused) return;
-
           if (targetMonth(plusDate) === targetMonthText || isSaturdayD1MondayCorrection) {
             dPlusJoinNosThisMonth.add(c.join_no);
           }
-          if (isTargetMatch) {
-            diagnosticData.dPlusCandidates[p.type] += 1;
+          if (plusDate === targetDate || isSaturdayD1MondayCorrection) {
             const a = isD95D185Type(p.type)
               ? resolveD95D185Assignee({ customer: c, employees: employees || [], employeeHistories: employeeHistories || [] })
               : decideAssignment(c, activeEmployees, stores || [], historyMap, staffByStore, {});
@@ -6923,16 +6874,6 @@ function TargetGenerator({ user }) {
               is_skipped: false,
               skip_reason: isSaturdayD1MondayCorrection ? `토요일 개통 D+1 월요일 보정 / ${a.reason || ''}` : a.reason
             });
-            diagnosticData.detailRows.push({
-              join_no: c.join_no,
-              customer_name: c.customer_name,
-              open_date: c.open_date,
-              call_type: p.type,
-              store_name: a.assigned_store || findCustomerStoreName(c),
-              seller_name: a.assigned_employee || findCustomerSellerName(c),
-              result: a.assigned_employee ? '후보' : '배정불가',
-              reason: isSaturdayD1MondayCorrection ? `토요일 개통 D+1 월요일 보정 / ${a.reason || ''}` : a.reason
-            });
           }
         });
       });
@@ -6940,43 +6881,11 @@ function TargetGenerator({ user }) {
       const counter = {};
       (customers || []).forEach(c => {
         if (!c.open_date || !c.join_no) return;
+        if (shouldSkipByRefusedCustomer(c, refusedMap, 'MONTHLY_DAY')) return;
         if (dayOfMonth(c.open_date) !== targetDay) return;
-        diagnosticData.monthly.sameDayRaw += 1;
+        if (!isSameOddEvenMonth(c.open_date, targetDate)) return;
+        if (dPlusJoinNosThisMonth.has(c.join_no)) return;
 
-        if (!isSameOddEvenMonth(c.open_date, targetDate)) {
-          diagnosticData.monthly.parityExcluded += 1;
-          return;
-        }
-        if (shouldSkipByRefusedCustomer(c, refusedMap, 'MONTHLY_DAY')) {
-          diagnosticData.monthly.refusedExcluded += 1;
-          diagnosticData.detailRows.push({
-            join_no: c.join_no,
-            customer_name: c.customer_name,
-            open_date: c.open_date,
-            call_type: 'MONTHLY_DAY',
-            store_name: findCustomerStoreName(c),
-            seller_name: findCustomerSellerName(c),
-            result: '제외',
-            reason: '월 정기 통화 불가 고객'
-          });
-          return;
-        }
-        if (dPlusJoinNosThisMonth.has(c.join_no)) {
-          diagnosticData.monthly.dPlusSameMonthExcluded += 1;
-          diagnosticData.detailRows.push({
-            join_no: c.join_no,
-            customer_name: c.customer_name,
-            open_date: c.open_date,
-            call_type: 'MONTHLY_DAY',
-            store_name: findCustomerStoreName(c),
-            seller_name: findCustomerSellerName(c),
-            result: '제외',
-            reason: '당월 D+ 대상 존재'
-          });
-          return;
-        }
-
-        diagnosticData.monthly.candidates += 1;
         const a = decideAssignment(c, activeEmployees, stores || [], historyMap, staffByStore, counter);
         rows.push({
           join_no: c.join_no,
@@ -6990,16 +6899,6 @@ function TargetGenerator({ user }) {
           is_skipped: false,
           skip_reason: a.reason
         });
-        diagnosticData.detailRows.push({
-          join_no: c.join_no,
-          customer_name: c.customer_name,
-          open_date: c.open_date,
-          call_type: 'MONTHLY_DAY',
-          store_name: a.assigned_store || findCustomerStoreName(c),
-          seller_name: a.assigned_employee || findCustomerSellerName(c),
-          result: a.assigned_employee ? '후보' : '배정불가',
-          reason: a.reason
-        });
       });
 
       const deduped = dedupeHappycallTargets(rows);
@@ -7009,34 +6908,16 @@ function TargetGenerator({ user }) {
       }
 
       const saveRows = finalRows.filter(r => r.assigned_employee);
-      diagnosticData.duplicateRemoved = deduped.duplicates.length;
-      diagnosticData.unassigned = finalRows.length - saveRows.length;
-      finalRows.forEach(r => {
-        diagnosticData.finalByType[r.call_type] = (diagnosticData.finalByType[r.call_type] || 0) + 1;
-      });
-
-      const { data: existingTargetRows, error: existingTargetError } = await supabase
-        .from('happycall_targets')
-        .select('id, join_no, call_type')
-        .eq('target_date', targetDate);
-      if (!existingTargetError) {
-        diagnosticData.existingOnTargetDate = existingTargetRows?.length || 0;
-      }
-
       setPreview(finalRows.slice(0, 150));
-      setDiagnosticResult(diagnosticData);
-
-      // 진단 모드에서는 DB와 배정 이력을 절대 변경하지 않음
-      if (!diagnosticOnly) {
-        for (const t of finalRows) {
-          if (t.assigned_employee && t.assigned_employee !== '배정불가') {
-            await supabase.from('assignment_history').upsert({
-              join_no: t.join_no,
-              assigned_employee: t.assigned_employee,
-              assigned_store: t.assigned_store,
-              updated_at: new Date().toISOString()
-            }, { onConflict: 'join_no' });
-          }
+            // V8 assignment history sync
+      for (const t of finalRows) {
+        if (t.assigned_employee && t.assigned_employee !== '배정불가') {
+          await supabase.from('assignment_history').upsert({
+            join_no: t.join_no,
+            assigned_employee: t.assigned_employee,
+            assigned_store: t.assigned_store,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'join_no' });
         }
       }
 
@@ -7047,8 +6928,7 @@ function TargetGenerator({ user }) {
         savable: saveRows.length,
         unassigned: finalRows.length - saveRows.length,
         rows: finalRows,
-        saveRows,
-        diagnosticOnly
+        saveRows
       });
     } catch(e) {
       alert('해피콜 생성 중 오류: ' + e.message);
@@ -7206,9 +7086,8 @@ function TargetGenerator({ user }) {
 
         <div className="formGrid compact">
           <input type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} />
-          <button onClick={()=>generateTargets(true)} disabled={busy}>생성 진단</button>
-          <button className="primary" onClick={()=>generateTargets(false)} disabled={busy}>대상 계산</button>
-          {summary && !summary.diagnosticOnly && <button className="primary" onClick={saveTargets} disabled={busy}>해피콜 대상 DB 저장</button>}
+          <button className="primary" onClick={generateTargets} disabled={busy}>대상 계산</button>
+          {summary && <button className="primary" onClick={saveTargets} disabled={busy}>해피콜 대상 DB 저장</button>}
         </div>
 
         {busy && <p className="muted">처리 중...</p>}
@@ -7222,83 +7101,6 @@ function TargetGenerator({ user }) {
           </div>
         )}
       </div>
-
-      {diagnosticResult && (
-        <div className="happycallDiagnostic">
-          <div className="happycallDiagnosticHead">
-            <div>
-              <h3>생성 진단 결과</h3>
-              <p className="muted">진단은 데이터를 저장하거나 배정 이력을 변경하지 않습니다.</p>
-            </div>
-            <button onClick={()=>setShowDiagnosticDetails(v=>!v)}>
-              {showDiagnosticDetails ? '상세 접기' : '상세 보기'}
-            </button>
-          </div>
-
-          <div className="diagnosticDateGrid">
-            <div><b>선택한 대상일</b><span>{diagnosticResult.selectedDate}</span></div>
-            {Object.entries(diagnosticResult.lookupDates || {}).map(([type, date]) => (
-              <div key={type}><b>{callTypeLabel(type)} 기준 개통일</b><span>{date}</span></div>
-            ))}
-          </div>
-
-          <div className="diagnosticCountGrid">
-            {['D_PLUS_1','D_PLUS_7','D_PLUS_13','D_PLUS_95','D_PLUS_185'].map(type => (
-              <div className="diagnosticCountCard" key={type}>
-                <b>{callTypeLabel(type)}</b>
-                <strong>{diagnosticResult.dPlusCandidates?.[type] || 0}건</strong>
-                <small>날짜 일치 {diagnosticResult.dPlusRawMatched?.[type] || 0} / 통화불가 제외 {diagnosticResult.dPlusRefusedExcluded?.[type] || 0}</small>
-              </div>
-            ))}
-            <div className="diagnosticCountCard">
-              <b>월 정기</b>
-              <strong>{diagnosticResult.monthly?.candidates || 0}건</strong>
-              <small>동일 일자 {diagnosticResult.monthly?.sameDayRaw || 0} / 홀짝 제외 {diagnosticResult.monthly?.parityExcluded || 0}</small>
-            </div>
-          </div>
-
-          <div className="diagnosticSummaryLine">
-            <span>월 정기 통화불가 제외 <b>{diagnosticResult.monthly?.refusedExcluded || 0}건</b></span>
-            <span>당월 D+ 중복 제외 <b>{diagnosticResult.monthly?.dPlusSameMonthExcluded || 0}건</b></span>
-            <span>가입번호 중복 제거 <b>{diagnosticResult.duplicateRemoved || 0}건</b></span>
-            <span>배정불가 <b>{diagnosticResult.unassigned || 0}건</b></span>
-            <span>이미 생성된 당일 건 <b>{diagnosticResult.existingOnTargetDate || 0}건</b></span>
-          </div>
-
-          {showDiagnosticDetails && (
-            <div className="diagnosticDetailWrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>가입번호</th>
-                    <th>개통일</th>
-                    <th>유형</th>
-                    <th>매장</th>
-                    <th>담당자</th>
-                    <th>판정</th>
-                    <th>사유</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(diagnosticResult.detailRows || []).slice(0, 500).map((r, i) => (
-                    <tr key={`${r.join_no}-${r.call_type}-${i}`}>
-                      <td>{r.customer_name ? `${r.customer_name} (${r.join_no})` : r.join_no}</td>
-                      <td>{r.open_date}</td>
-                      <td>{callTypeLabel(r.call_type)}</td>
-                      <td>{r.store_name || '-'}</td>
-                      <td>{r.seller_name || '-'}</td>
-                      <td>{r.result}</td>
-                      <td>{r.reason || '-'}</td>
-                    </tr>
-                  ))}
-                  {!(diagnosticResult.detailRows || []).length && <tr><td colSpan="7">진단 상세 내역이 없습니다.</td></tr>}
-                </tbody>
-              </table>
-              {(diagnosticResult.detailRows || []).length > 500 && <p className="muted">상세 내역은 화면 성능을 위해 최대 500건까지만 표시합니다.</p>}
-            </div>
-          )}
-        </div>
-      )}
 
       {preview.length > 0 && (
         <div>

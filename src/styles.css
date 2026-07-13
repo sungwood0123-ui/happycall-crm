@@ -9538,7 +9538,7 @@ body.modal-open{
 }
 
 /* =========================================================
-   V29.40 모바일 관리자 조정/직원상세 정렬 보정
+   V29.39 모바일 관리자 조정/직원상세 정렬 보정
    대상 화면만 한정 적용
    ========================================================= */
 @media(max-width:768px){
@@ -9605,7 +9605,7 @@ body.modal-open{
 }
 
 /* =========================================================
-   V29.40 누적 안정화: 전체 로딩 UI 공통 규칙
+   V29.39 누적 안정화: 전체 로딩 UI 공통 규칙
    PC: 조회 영역 전체 너비 / 가운데 정렬
    Mobile: 카드 폭 안에서 가운데 정렬
    ========================================================= */
@@ -9656,78 +9656,4 @@ td > .inlineLoadingState,
 @media(max-width:768px){
   .pageLoadingPanel{min-height:84px !important;padding:14px !important;}
   .inlineLoadingState{min-height:52px !important;padding:10px 12px !important;}
-}
-
-/* =========================================================
-   V29.40 해피콜 생성 진단 화면
-   ========================================================= */
-.happycallDiagnostic{
-  margin-top:16px;
-  padding:16px;
-  border:1px solid #dfe5ee;
-  border-radius:14px;
-  background:#fff;
-  box-sizing:border-box;
-}
-.happycallDiagnosticHead{
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap:12px;
-  margin-bottom:14px;
-}
-.happycallDiagnosticHead h3{margin:0 0 4px;}
-.happycallDiagnosticHead p{margin:0;}
-.diagnosticDateGrid,
-.diagnosticCountGrid{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
-  gap:10px;
-}
-.diagnosticDateGrid{margin-bottom:12px;}
-.diagnosticDateGrid>div,
-.diagnosticCountCard{
-  border:1px solid #e3e8f0;
-  border-radius:10px;
-  padding:12px;
-  display:flex;
-  flex-direction:column;
-  gap:5px;
-  min-width:0;
-  background:#fafbfd;
-}
-.diagnosticDateGrid span{font-size:14px;word-break:keep-all;}
-.diagnosticCountCard strong{font-size:22px;line-height:1.2;}
-.diagnosticCountCard small{font-size:12px;color:#6b7280;line-height:1.45;}
-.diagnosticSummaryLine{
-  margin-top:12px;
-  display:flex;
-  flex-wrap:wrap;
-  gap:8px;
-}
-.diagnosticSummaryLine span{
-  padding:8px 10px;
-  border-radius:999px;
-  background:#f1f5f9;
-  font-size:13px;
-  white-space:nowrap;
-}
-.diagnosticDetailWrap{
-  margin-top:14px;
-  overflow:auto;
-  max-height:55vh;
-  border:1px solid #e3e8f0;
-  border-radius:10px;
-}
-.diagnosticDetailWrap table{margin:0;min-width:900px;}
-@media(max-width:768px){
-  .happycallDiagnostic{padding:12px;}
-  .happycallDiagnosticHead{align-items:center;}
-  .diagnosticDateGrid,
-  .diagnosticCountGrid{grid-template-columns:1fr 1fr;gap:8px;}
-  .diagnosticDateGrid>div,
-  .diagnosticCountCard{padding:10px;}
-  .diagnosticCountCard strong{font-size:19px;}
-  .diagnosticSummaryLine{gap:6px;}
-  .diagnosticSummaryLine span{font-size:12px;padding:7px 9px;}
 }
