@@ -11,12 +11,12 @@
 <body>
   <div id="root"></div>
   <script>
-    // V29.43: 이전 배포 파일이 브라우저에 남는 문제 방지
-    window.__SECHAN_RELEASE__ = 'V29.43';
+    // V29.44: 이전 배포 파일이 브라우저에 남는 문제 방지
+    window.__SECHAN_RELEASE__ = 'V29.44';
     if ('caches' in window) {
       caches.keys().then(function(keys){ return Promise.all(keys.map(function(key){ return caches.delete(key); })); }).catch(function(){});
     }
   </script>
-  <script type="module" src="/src/main-v2943.jsx"></script>
+  <script type="module" src="/src/main-v2944.jsx"></script>
 </body>
 </html>

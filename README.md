@@ -1,18 +1,24 @@
-# 세찬컴퍼니 인트라넷 V29.43
+# 세찬컴퍼니 인트라넷 V29.44
 
 ## 기준 버전
-- V29.42 설치완료 기준
+- V29.43 설치 완료 기준
 
 ## 반영 내용
-- 해피콜 생성 탭의 `diagnostic is not defined` 오류 전체 점검
-- 실제 소스에서 정의되지 않은 `diagnostic` 직접 참조가 남아 있지 않은지 전체 검색
-- 브라우저가 이전 배포 파일을 계속 실행하지 않도록 앱 시작 파일 주소 변경
-- 메인 화면과 앱 파일의 캐시 방지 설정 강화
-- 기존 해피콜 생성·저장·진단 계산 기준은 변경하지 않음
+- 실제 실행 파일을 `src/main-v2944.jsx`로 통일
+- `index.html`이 위 실행 파일만 불러오도록 경로 일치
+- 프로젝트 전체에서 정의되지 않은 `diagnostic` 및 `setDiagnostic` 직접 참조 제거 확인
+- 해피콜 생성 탭의 진단 상태는 `diagnosticResult` / `setDiagnosticResult`만 사용
+- 프리패스 로그 코드 문법 정상 여부 확인
+- 기존 해피콜 생성·저장·배정 기준은 변경하지 않음
 
 ## QA
-- 프로젝트 전체 `diagnostic` 참조 검색: PASS
-- 소스 문법 및 실제 빌드: PASS
-- 새 진입 파일 생성 및 연결: PASS
-- ZIP / README / version.json / 화면 버전: V29.43 일치
+- `diagnostic` 미정의 직접 참조 검색: 0건
+- `setDiagnostic` 미정의 직접 참조 검색: 0건
+- Vite 실제 production build: PASS
+- 실행 진입 파일 경로 일치: PASS
+- ZIP / README / version.json / 화면 버전: V29.44 일치
 - SQL 작업 없음
+
+## 설치 시 주의
+- ZIP 안의 파일과 `src` 폴더를 저장소 최상단에 그대로 업로드하세요.
+- 이전 `src/main-v2943.jsx`가 남아 있어도 `index.html`은 새 `src/main-v2944.jsx`만 실행합니다.
