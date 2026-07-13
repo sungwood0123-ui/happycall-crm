@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'V29.41';
+const APP_BUILD_VERSION = 'V29.42';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -6812,7 +6812,7 @@ function TargetGenerator({ user }) {
     setBusy(true);
     setSummary(null);
     setPreview([]);
-    setDiagnostic(null);
+    setDiagnosticResult(null);
     setShowDiagnosticDetails(false);
 
     try {
