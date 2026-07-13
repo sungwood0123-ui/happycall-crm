@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'V29.40';
+const APP_BUILD_VERSION = 'V29.41';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -6164,7 +6164,7 @@ function RawUpload({ user }) {
   const [fileName, setFileName] = useState('');
   const [summary, setSummary] = useState(null);
   const [preview, setPreview] = useState([]);
-  const [diagnostic, setDiagnostic] = useState(null);
+  const [diagnosticResult, setDiagnosticResult] = useState(null);
   const [showDiagnosticDetails, setShowDiagnosticDetails] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -7024,7 +7024,7 @@ function TargetGenerator({ user }) {
       }
 
       setPreview(finalRows.slice(0, 150));
-      setDiagnostic(diagnosticData);
+      setDiagnosticResult(diagnosticData);
 
       // 진단 모드에서는 DB와 배정 이력을 절대 변경하지 않음
       if (!diagnosticOnly) {
@@ -7223,7 +7223,7 @@ function TargetGenerator({ user }) {
         )}
       </div>
 
-      {diagnostic && (
+      {diagnosticResult && (
         <div className="happycallDiagnostic">
           <div className="happycallDiagnosticHead">
             <div>
@@ -7236,8 +7236,8 @@ function TargetGenerator({ user }) {
           </div>
 
           <div className="diagnosticDateGrid">
-            <div><b>선택한 대상일</b><span>{diagnostic.selectedDate}</span></div>
-            {Object.entries(diagnostic.lookupDates).map(([type, date]) => (
+            <div><b>선택한 대상일</b><span>{diagnosticResult.selectedDate}</span></div>
+            {Object.entries(diagnosticResult.lookupDates || {}).map(([type, date]) => (
               <div key={type}><b>{callTypeLabel(type)} 기준 개통일</b><span>{date}</span></div>
             ))}
           </div>
@@ -7246,23 +7246,23 @@ function TargetGenerator({ user }) {
             {['D_PLUS_1','D_PLUS_7','D_PLUS_13','D_PLUS_95','D_PLUS_185'].map(type => (
               <div className="diagnosticCountCard" key={type}>
                 <b>{callTypeLabel(type)}</b>
-                <strong>{diagnostic.dPlusCandidates[type] || 0}건</strong>
-                <small>날짜 일치 {diagnostic.dPlusRawMatched[type] || 0} / 통화불가 제외 {diagnostic.dPlusRefusedExcluded[type] || 0}</small>
+                <strong>{diagnosticResult.dPlusCandidates?.[type] || 0}건</strong>
+                <small>날짜 일치 {diagnosticResult.dPlusRawMatched?.[type] || 0} / 통화불가 제외 {diagnosticResult.dPlusRefusedExcluded?.[type] || 0}</small>
               </div>
             ))}
             <div className="diagnosticCountCard">
               <b>월 정기</b>
-              <strong>{diagnostic.monthly.candidates || 0}건</strong>
-              <small>동일 일자 {diagnostic.monthly.sameDayRaw || 0} / 홀짝 제외 {diagnostic.monthly.parityExcluded || 0}</small>
+              <strong>{diagnosticResult.monthly?.candidates || 0}건</strong>
+              <small>동일 일자 {diagnosticResult.monthly?.sameDayRaw || 0} / 홀짝 제외 {diagnosticResult.monthly?.parityExcluded || 0}</small>
             </div>
           </div>
 
           <div className="diagnosticSummaryLine">
-            <span>월 정기 통화불가 제외 <b>{diagnostic.monthly.refusedExcluded || 0}건</b></span>
-            <span>당월 D+ 중복 제외 <b>{diagnostic.monthly.dPlusSameMonthExcluded || 0}건</b></span>
-            <span>가입번호 중복 제거 <b>{diagnostic.duplicateRemoved || 0}건</b></span>
-            <span>배정불가 <b>{diagnostic.unassigned || 0}건</b></span>
-            <span>이미 생성된 당일 건 <b>{diagnostic.existingOnTargetDate || 0}건</b></span>
+            <span>월 정기 통화불가 제외 <b>{diagnosticResult.monthly?.refusedExcluded || 0}건</b></span>
+            <span>당월 D+ 중복 제외 <b>{diagnosticResult.monthly?.dPlusSameMonthExcluded || 0}건</b></span>
+            <span>가입번호 중복 제거 <b>{diagnosticResult.duplicateRemoved || 0}건</b></span>
+            <span>배정불가 <b>{diagnosticResult.unassigned || 0}건</b></span>
+            <span>이미 생성된 당일 건 <b>{diagnosticResult.existingOnTargetDate || 0}건</b></span>
           </div>
 
           {showDiagnosticDetails && (
@@ -7280,7 +7280,7 @@ function TargetGenerator({ user }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {diagnostic.detailRows.slice(0, 500).map((r, i) => (
+                  {(diagnosticResult.detailRows || []).slice(0, 500).map((r, i) => (
                     <tr key={`${r.join_no}-${r.call_type}-${i}`}>
                       <td>{r.customer_name ? `${r.customer_name} (${r.join_no})` : r.join_no}</td>
                       <td>{r.open_date}</td>
@@ -7291,10 +7291,10 @@ function TargetGenerator({ user }) {
                       <td>{r.reason || '-'}</td>
                     </tr>
                   ))}
-                  {!diagnostic.detailRows.length && <tr><td colSpan="7">진단 상세 내역이 없습니다.</td></tr>}
+                  {!(diagnosticResult.detailRows || []).length && <tr><td colSpan="7">진단 상세 내역이 없습니다.</td></tr>}
                 </tbody>
               </table>
-              {diagnostic.detailRows.length > 500 && <p className="muted">상세 내역은 화면 성능을 위해 최대 500건까지만 표시합니다.</p>}
+              {(diagnosticResult.detailRows || []).length > 500 && <p className="muted">상세 내역은 화면 성능을 위해 최대 500건까지만 표시합니다.</p>}
             </div>
           )}
         </div>
