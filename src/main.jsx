@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'V29.45';
+const APP_BUILD_VERSION = 'V29.46';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -40,13 +40,12 @@ const CALL_RESULTS = {
   '통화 불가': ['2nd디바이스', '타점 변경', '통신사 이동', '해지', '마케팅 미동의', '고객사정', '미성년자', '사고 발생건']
 };
 
-function isUnavailableCall(result, detail) {
-  return result === '통화 불가' || result === '통화거부' || detail === '통화거부' ||
-    ['2nd디바이스', '타점 변경', '통신사 이동', '해지', '마케팅 미동의', '고객사정', '미성년자', '사고 발생건'].includes(detail);
+function isUnavailableCall(result) {
+  return result === '통화 불가';
 }
 
-function shouldExcludeUnavailable(detail) {
-  return isUnavailableCall('통화 불가', detail) && detail !== '미성년자';
+function shouldExcludeUnavailable(result) {
+  return isUnavailableCall(result);
 }
 
 function toComparableDate(value) {
@@ -3813,7 +3812,7 @@ async function save() {
       }
       if (saveError) throw saveError;
 
-      if (shouldExcludeUnavailable(detail)) {
+      if (shouldExcludeUnavailable(result)) {
         await supabase.from('refused_customers').upsert({
           join_no: target.join_no,
           target_id: target.id,
