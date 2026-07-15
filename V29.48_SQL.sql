@@ -66,4 +66,42 @@ where regexp_replace(coalesce(t.assigned_store, ''), '\s', '', 'g')
     select 1 from public.happycall_logs l where l.target_id = t.id
   );
 
+with ranked_targets as (
+  select
+    t.id,
+    first_value(t.id) over (
+      partition by t.join_no, t.target_date
+      order by
+        (exists (select 1 from public.happycall_logs l where l.target_id = t.id)) desc,
+        t.created_at asc,
+        t.id asc
+    ) as kept_target_id,
+    row_number() over (
+      partition by t.join_no, t.target_date
+      order by
+        (exists (select 1 from public.happycall_logs l where l.target_id = t.id)) desc,
+        t.created_at asc,
+        t.id asc
+    ) as duplicate_rank
+  from public.happycall_targets t
+  where coalesce(t.is_skipped, false) = false
+), duplicate_targets as (
+  select r.id, r.kept_target_id
+  from ranked_targets r
+  where r.duplicate_rank > 1
+    and not exists (
+      select 1 from public.happycall_logs l where l.target_id = r.id
+    )
+)
+update public.happycall_targets t
+set
+  is_skipped = true,
+  skip_reason = 'V29.48 중복 자동 제외 / 유지 대상 ID: ' || d.kept_target_id::text
+from duplicate_targets d
+where t.id = d.id;
+
+create unique index if not exists happycall_targets_active_join_date_unique
+  on public.happycall_targets (join_no, target_date)
+  where coalesce(is_skipped, false) = false;
+
 commit;

@@ -7103,9 +7103,33 @@ function TargetGenerator({ user }) {
 
       for (let i = 0; i < insertRows.length; i += 500) {
         const chunk = insertRows.slice(i, i + 500);
-        const { error } = await supabase.from('happycall_targets').insert(chunk);
+        let rowsToInsert = chunk;
+        let { error } = await supabase.from('happycall_targets').insert(rowsToInsert);
+
+        if (error?.code === '23505') {
+          const { data: refreshedRows, error: refreshError } = await supabase
+            .from('happycall_targets')
+            .select('join_no, target_date, is_skipped')
+            .eq('target_date', targetDate);
+
+          if (refreshError) throw refreshError;
+
+          const refreshedKeys = new Set(
+            (refreshedRows || [])
+              .filter(r => r.is_skipped !== true)
+              .map(r => `${r.join_no}|${r.target_date}`)
+          );
+          rowsToInsert = rowsToInsert.filter(r => !refreshedKeys.has(`${r.join_no}|${r.target_date}`));
+
+          if (rowsToInsert.length) {
+            ({ error } = await supabase.from('happycall_targets').insert(rowsToInsert));
+          } else {
+            error = null;
+          }
+        }
+
         if (error) throw error;
-        saved += chunk.length;
+        saved += rowsToInsert.length;
       }
 
       const historyRows = dedupedSave.rows.map(r => ({
