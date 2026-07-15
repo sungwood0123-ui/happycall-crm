@@ -6536,6 +6536,18 @@ function normalizeStoreNameForAssignment(v) {
   return String(v || '').trim();
 }
 
+const HAPPY_CALL_EXCLUDED_STORES = new Set(['사무실', '에스플러스', '퍼스트']);
+
+function isHappycallExcludedStore(storeName) {
+  const normalized = String(storeName || '').replace(/\s+/g, '').trim();
+  return HAPPY_CALL_EXCLUDED_STORES.has(normalized);
+}
+
+function isHappycallExcludedCustomer(customer = {}) {
+  return isHappycallExcludedStore(customer.store_name) ||
+    isHappycallExcludedStore(customer.raw_store_name);
+}
+
 function isD95D185Type(callType) {
   return callType === 'D_PLUS_95' || callType === 'D_PLUS_185';
 }
@@ -6860,6 +6872,7 @@ function TargetGenerator({ user }) {
 
       (customers || []).forEach(c => {
         if (!c.open_date || !c.join_no) return;
+        if (isHappycallExcludedCustomer(c)) return;
         plusMap.forEach(p => {
           if (shouldSkipByRefusedCustomer(c, refusedMap, p.type, refusedDetailMap)) return;
           const plusDate = addDays(c.open_date, p.days);
@@ -6871,6 +6884,7 @@ function TargetGenerator({ user }) {
             const a = isD95D185Type(p.type)
               ? resolveD95D185Assignee({ customer: c, employees: employees || [], employeeHistories: employeeHistories || [] })
               : decideAssignment(c, activeEmployees, stores || [], historyMap, staffByStore, {});
+            if (isHappycallExcludedStore(a.assigned_store)) return;
             rows.push({
               join_no: c.join_no,
               customer_name: c.customer_name,
@@ -6890,12 +6904,14 @@ function TargetGenerator({ user }) {
       const counter = {};
       (customers || []).forEach(c => {
         if (!c.open_date || !c.join_no) return;
+        if (isHappycallExcludedCustomer(c)) return;
         if (shouldSkipByRefusedCustomer(c, refusedMap, 'MONTHLY_DAY', refusedDetailMap)) return;
         if (dayOfMonth(c.open_date) !== targetDay) return;
         if (!isSameOddEvenMonth(c.open_date, targetDate)) return;
         if (dPlusJoinNosThisMonth.has(c.join_no)) return;
 
         const a = decideAssignment(c, activeEmployees, stores || [], historyMap, staffByStore, counter);
+        if (isHappycallExcludedStore(a.assigned_store)) return;
         rows.push({
           join_no: c.join_no,
           customer_name: c.customer_name,
