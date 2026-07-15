@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'V29.46';
+const APP_BUILD_VERSION = 'V29.47';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -37,8 +37,10 @@ async function fetchAllRows(tableName, selectText = '*', orderColumn = null) {
 const CALL_RESULTS = {
   '통화 완료': ['불만사항없음', '불만사항있음'],
   '부재중': ['카카오톡발송', '문자발송'],
-  '통화 불가': ['2nd디바이스', '타점 변경', '통신사 이동', '해지', '마케팅 미동의', '고객사정', '미성년자', '사고 발생건']
+  '통화 불가': ['2nd디바이스', '타점 변경', '통신사 이동', '해지', '마케팅 미동의', '고객사정', '사고 발생건']
 };
+
+const D95_D185_RECHECK_UNAVAILABLE_DETAILS = new Set(['고객사정', '마케팅 미동의', '사고 발생건']);
 
 function isUnavailableCall(result) {
   return result === '통화 불가';
@@ -64,11 +66,13 @@ function isNewOpeningAfterRefusal(openDate, refusedAt) {
   return openTime > refusedTime;
 }
 
-function shouldSkipByRefusedCustomer(customer, refusedMap, callType = '') {
-  if (isD95D185Type(callType)) return false;
+function shouldSkipByRefusedCustomer(customer, refusedMap, callType = '', refusedDetailMap = {}) {
   const refused = refusedMap?.[customer.join_no];
   if (!refused) return false;
   if (isNewOpeningAfterRefusal(customer.open_date, refused.refused_at)) return false;
+  if (isD95D185Type(callType)) {
+    return !D95_D185_RECHECK_UNAVAILABLE_DETAILS.has(refusedDetailMap?.[customer.join_no]);
+  }
   return true;
 }
 
@@ -78,8 +82,8 @@ function dayOfWeekLocal(dateText) {
 function isMondayLocal(dateText) { return dayOfWeekLocal(dateText) === 1; }
 function isSaturdayLocal(dateText) { return dayOfWeekLocal(dateText) === 6; }
 function addDaysText(dateText, days) {
-  const d = new Date(`${dateText}T00:00:00`);
-  d.setDate(d.getDate() + days);
+  const d = new Date(`${dateText}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
 
@@ -6741,14 +6745,8 @@ function TargetGenerator({ user }) {
   const [summary, setSummary] = useState(null);
   const [preview, setPreview] = useState([]);
 
-  function ymd(date) {
-    return date.toISOString().slice(0, 10);
-  }
-
   function addDays(dateText, days) {
-    const d = new Date(dateText + 'T00:00:00');
-    d.setDate(d.getDate() + days);
-    return ymd(d);
+    return addDaysText(dateText, days);
   }
 
   function targetMonth(dateText) {
@@ -6811,13 +6809,14 @@ function TargetGenerator({ user }) {
     setPreview([]);
 
     try {
-      const [customers, employees, stores, histories, employeeHistories, refusedRows] = await Promise.all([
+      const [customers, employees, stores, histories, employeeHistories, refusedRows, happycallLogs] = await Promise.all([
         fetchAllRows('customers', '*', 'open_date'),
         fetchAllRows('employees', '*', 'name'),
         fetchAllRows('stores', '*', 'name'),
         fetchAllRows('assignment_history', '*', 'updated_at'),
         fetchAllRows('employee_store_history', '*', 'start_date'),
-        fetchAllRows('refused_customers', '*', 'refused_at')
+        fetchAllRows('refused_customers', '*', 'refused_at'),
+        fetchAllRows('happycall_logs', 'join_no,call_result,call_detail,checked_at,review_status', 'checked_at')
       ]);
 
       const activeEmployees = (employees || []).filter(e => isHappycallAssignableEmployee(e));
@@ -6833,6 +6832,17 @@ function TargetGenerator({ user }) {
       (histories || []).forEach(h => historyMap[h.join_no] = h);
 
       const refusedMap = Object.fromEntries((refusedRows || []).map(r => [String(r.join_no || ''), r]));
+      const latestUnavailableByJoinNo = {};
+      (happycallLogs || []).forEach(log => {
+        if (!log.join_no || log.call_result !== '통화 불가' || log.review_status === '반려') return;
+        const previous = latestUnavailableByJoinNo[log.join_no];
+        if (!previous || String(log.checked_at || '').localeCompare(String(previous.checked_at || '')) > 0) {
+          latestUnavailableByJoinNo[log.join_no] = log;
+        }
+      });
+      const refusedDetailMap = Object.fromEntries(
+        Object.entries(latestUnavailableByJoinNo).map(([joinNo, log]) => [joinNo, log.call_detail])
+      );
 
       const plusMap = [
         { days: 1, type: 'D_PLUS_1' },
@@ -6851,7 +6861,7 @@ function TargetGenerator({ user }) {
       (customers || []).forEach(c => {
         if (!c.open_date || !c.join_no) return;
         plusMap.forEach(p => {
-          if (shouldSkipByRefusedCustomer(c, refusedMap, p.type)) return;
+          if (shouldSkipByRefusedCustomer(c, refusedMap, p.type, refusedDetailMap)) return;
           const plusDate = addDays(c.open_date, p.days);
           const isSaturdayD1MondayCorrection = p.days === 1 && isMondayLocal(targetDate) && isSaturdayLocal(c.open_date) && addDays(c.open_date, 2) === targetDate;
           if (targetMonth(plusDate) === targetMonthText || isSaturdayD1MondayCorrection) {
@@ -6880,7 +6890,7 @@ function TargetGenerator({ user }) {
       const counter = {};
       (customers || []).forEach(c => {
         if (!c.open_date || !c.join_no) return;
-        if (shouldSkipByRefusedCustomer(c, refusedMap, 'MONTHLY_DAY')) return;
+        if (shouldSkipByRefusedCustomer(c, refusedMap, 'MONTHLY_DAY', refusedDetailMap)) return;
         if (dayOfMonth(c.open_date) !== targetDay) return;
         if (!isSameOddEvenMonth(c.open_date, targetDate)) return;
         if (dPlusJoinNosThisMonth.has(c.join_no)) return;
