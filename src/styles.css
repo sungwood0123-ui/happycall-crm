@@ -6488,10 +6488,25 @@ table th,table td{padding:9px 8px !important;vertical-align:middle !important;li
 }
 
 .assignmentStatusTable input[type="checkbox"]{
-  width:14px !important;
-  height:14px !important;
-  min-width:14px !important;
-  min-height:14px !important;
+  appearance:none !important;
+  -webkit-appearance:none !important;
+  display:inline-block !important;
+  width:16px !important;
+  height:16px !important;
+  min-width:16px !important;
+  min-height:16px !important;
+  max-width:16px !important;
+  max-height:16px !important;
+  margin:0 !important;
+  padding:0 !important;
+  border:1.5px solid #94a3b8 !important;
+  border-radius:3px !important;
+  background:#fff !important;
+  vertical-align:middle !important;
+}
+.assignmentStatusTable input[type="checkbox"]:checked{
+  border-color:#2563eb !important;
+  background:#2563eb url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.2' d='m3.5 8 3 3 6-6'/%3E%3C/svg%3E") center/14px 14px no-repeat !important;
 }
 
 @media(max-width:768px){
@@ -9188,6 +9203,13 @@ select{
 .mobileInfoCard span{display:block;color:#64748b;font-size:12px;line-height:1.3;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .mobileInfoCard em{flex:0 0 auto;font-style:normal;}
 .mobileInfoCardExtra{margin-top:10px;padding-top:10px;border-top:1px solid #eef2f7;color:#475569;font-size:12px;}
+.badge.scheduled{background:#e0f2fe !important;color:#075985 !important;white-space:nowrap !important;}
+.scheduledFilter{border-color:#38bdf8 !important;color:#075985 !important;}
+.scheduleEditSection{border:1px solid #bae6fd !important;background:#f0f9ff !important;border-radius:14px !important;padding:14px !important;}
+.scheduleEditBox{display:grid !important;grid-template-columns:minmax(160px,.8fr) minmax(220px,1.5fr) auto auto !important;gap:10px !important;align-items:end !important;}
+.scheduleEditBox label{display:grid !important;gap:6px !important;color:#334155 !important;font-size:13px !important;font-weight:800 !important;}
+.scheduleEditBox input{height:42px !important;min-height:42px !important;}
+.scheduleEditBox button{min-height:42px !important;white-space:nowrap !important;}
 
 @media(max-width:768px){
   .freepassApprovalTableWrap,
@@ -9203,6 +9225,8 @@ select{
     margin-top:12px !important;
   }
   .sectionCard .mobileCardList{overflow:visible !important;}
+  .scheduleEditBox{grid-template-columns:1fr !important;}
+  .scheduleEditBox button{width:100% !important;}
   .inlineLoadingState,
   .freepassStateBox{
     min-height:48px !important;

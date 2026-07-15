@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
 
-const APP_BUILD_VERSION = 'V29.47';
+const APP_BUILD_VERSION = 'V29.48';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -3134,40 +3134,52 @@ function formatKST(value) {
 }
 
 function calculateCallStats(targets, latestLogByTarget, today = todayLocalISO()) {
-  const total = targets.length;
   const isRejected = (t) => latestLogByTarget[t.id]?.review_status === '반려';
   const isCompleted = (t) => latestLogByTarget[t.id] && !isRejected(t);
-  const done = targets.filter(isCompleted).length;
-  const rejected = targets.filter(isRejected).length;
-  const pending = targets.filter(t => !latestLogByTarget[t.id] || isRejected(t)).length;
-  const todayTargets = targets.filter(t => t.target_date === today);
+  const scheduledTargets = targets.filter(t => !latestLogByTarget[t.id] && effectiveTargetDate(t) > today);
+  const activeTargets = targets.filter(t => isCompleted(t) || isRejected(t) || effectiveTargetDate(t) <= today);
+  const total = activeTargets.length;
+  const done = activeTargets.filter(isCompleted).length;
+  const rejected = activeTargets.filter(isRejected).length;
+  const pending = activeTargets.filter(t => !latestLogByTarget[t.id] || isRejected(t)).length;
+  const todayTargets = activeTargets.filter(t => effectiveTargetDate(t) === today);
   const todayDone = todayTargets.filter(isCompleted).length;
-  const overdueTargets = targets.filter(t => (!latestLogByTarget[t.id] || isRejected(t)) && diffDays(t.target_date, today) > 0);
-  const voc = targets.filter(t => latestLogByTarget[t.id]?.call_detail === '불만사항있음').length;
-  const absent = targets.filter(t => latestLogByTarget[t.id]?.call_result === '부재중').length;
-  return { total, done, pending, rate: total ? Math.round(done/total*1000)/10 : 0,
+  const overdueTargets = activeTargets.filter(t => (!latestLogByTarget[t.id] || isRejected(t)) && diffDays(effectiveTargetDate(t), today) > 0);
+  const voc = activeTargets.filter(t => latestLogByTarget[t.id]?.call_detail === '불만사항있음').length;
+  const absent = activeTargets.filter(t => latestLogByTarget[t.id]?.call_result === '부재중').length;
+  return { total, allTotal: targets.length, done, pending, rate: total ? Math.round(done/total*1000)/10 : 0,
     todayTotal: todayTargets.length, todayDone, todayPending: todayTargets.length - todayDone,
     todayRate: todayTargets.length ? Math.round(todayDone/todayTargets.length*1000)/10 : 0,
-    overdue: overdueTargets.length, voc, absent, rejected };
+    overdue: overdueTargets.length, scheduled: scheduledTargets.length, voc, absent, rejected };
 }
+
+function effectiveTargetDate(target) {
+  return target?.scheduled_date || target?.target_date || '';
+}
+
+function isFutureScheduledTarget(target, today = todayLocalISO()) {
+  return Boolean(target?.scheduled_date && effectiveTargetDate(target) > today);
+}
+
 function sortTargetsByPriority(a, b, latestLogByTarget, today = todayLocalISO()) {
   const rank = (t) => {
     if (latestLogByTarget[t.id]) return 3;
-    const d = diffDays(t.target_date, today);
+    const d = diffDays(effectiveTargetDate(t), today);
     if (d > 0) return 0;
     if (d === 0) return 1;
     return 2;
   };
   const r = rank(a)-rank(b);
   if (r !== 0) return r;
-  const da = diffDays(a.target_date, today);
-  const db = diffDays(b.target_date, today);
+  const da = diffDays(effectiveTargetDate(a), today);
+  const db = diffDays(effectiveTargetDate(b), today);
   if (!latestLogByTarget[a.id] && !latestLogByTarget[b.id] && da !== db) return db-da;
-  return String(b.target_date).localeCompare(String(a.target_date));
+  return String(effectiveTargetDate(b)).localeCompare(String(effectiveTargetDate(a)));
 }
 function StatusBadge({ target, log }) {
   if (log) return <span className="badge done">완료</span>;
-  const overdueDays = diffDays(target.target_date);
+  if (isFutureScheduledTarget(target)) return <span className="badge scheduled">처리 예정 · {effectiveTargetDate(target)}</span>;
+  const overdueDays = diffDays(effectiveTargetDate(target));
   if (overdueDays > 0) return <span className={overdueDays >= 3 ? "badge danger" : "badge warn"}>{overdueDays}일 경과</span>;
   if (overdueDays === 0) return <span className="badge today">오늘 신규</span>;
   return <span className="badge">예정</span>;
@@ -3420,9 +3432,10 @@ function CallList({ user, mode, readOnly = false }) {
       if (employeeFilter !== '전체') list = list.filter(t => t.assigned_employee === employeeFilter || t.temporary_assignee === employeeFilter);
     }
     if (filter === '반려') list = list.filter(t => latestLogByTarget[t.id]?.review_status === '반려');
-    else if (filter === '경과미완료') list = list.filter(t => !latestLogByTarget[t.id] && diffDays(t.target_date) > 0);
-    else if (filter === '오늘신규') list = list.filter(t => t.target_date === todayLocalISO());
-    else if (filter === '미완료전체') list = list.filter(t => !latestLogByTarget[t.id] || latestLogByTarget[t.id]?.review_status === '반려');
+    else if (filter === '경과미완료') list = list.filter(t => !latestLogByTarget[t.id] && diffDays(effectiveTargetDate(t)) > 0);
+    else if (filter === '오늘신규') list = list.filter(t => effectiveTargetDate(t) === todayLocalISO());
+    else if (filter === '처리예정') list = list.filter(t => !latestLogByTarget[t.id] && isFutureScheduledTarget(t));
+    else if (filter === '미완료전체') list = list.filter(t => (!latestLogByTarget[t.id] || latestLogByTarget[t.id]?.review_status === '반려') && effectiveTargetDate(t) <= todayLocalISO());
     else if (filter === '완료') list = list.filter(t => latestLogByTarget[t.id] && latestLogByTarget[t.id]?.review_status !== '반려');
     return list.sort((a,b)=>sortTargetsByPriority(a,b,latestLogByTarget));
   }, [targets, latestLogByTarget, filter, mode, storeFilter, employeeFilter]);
@@ -3452,8 +3465,9 @@ function CallList({ user, mode, readOnly = false }) {
         <button className={filter==='반려'?'active rejected':''} onClick={()=>setFilter('반려')}>반려 {stats.rejected}</button>
         <button className={filter==='경과미완료'?'active':''} onClick={()=>setFilter('경과미완료')}>경과 미완료 {stats.overdue}</button>
         <button className={filter==='오늘신규'?'active':''} onClick={()=>setFilter('오늘신규')}>오늘 신규 {stats.todayTotal}</button>
+        <button className={filter==='처리예정'?'active scheduledFilter':''} onClick={()=>setFilter('처리예정')}>처리 예정 {stats.scheduled}</button>
         <button className={filter==='완료'?'active':''} onClick={()=>setFilter('완료')}>완료 {stats.done}</button>
-        <button className={filter==='전체'?'active':''} onClick={()=>setFilter('전체')}>전체 {stats.total}</button>
+        <button className={filter==='전체'?'active':''} onClick={()=>setFilter('전체')}>전체 {stats.allTotal}</button>
         {mode === 'mine' && (user.role === '관리자' || user.role === '점장') && <button className="blueActionBtn" onClick={()=>setBulkTempOpen(true)}>임시 배정 하기</button>}
       </div>
       {mode === 'all' && (
@@ -3475,7 +3489,7 @@ function CallList({ user, mode, readOnly = false }) {
               <div>
                 <b>{formatCustomerJoinNo(t.join_no, customersByJoinNo, t.customer_name)}</b>
                 <p>{t.assigned_store} · {t.temporary_assignee ? `${t.assigned_employee} → 임시 ${t.temporary_assignee}` : t.assigned_employee} · {callTypeLabel(t.call_type)}</p>
-                <p className="muted">대상일 {t.target_date} / {t.skip_reason || t.assign_reason || ''}</p>
+                <p className="muted">{t.scheduled_date ? `원 대상일 ${t.original_target_date || t.target_date} · 처리 예정일 ${t.scheduled_date}` : `대상일 ${t.target_date}`} / {t.skip_reason || t.assign_reason || ''}</p>
                 {log?.review_status === '반려' && <p className="rejectReason">반려사유: {log.review_memo || '반려 사유 없음'}</p>}
               </div>
               {log?.review_status === '반려' ? <span className="badge rejected">반려</span> : <StatusBadge target={t} log={log} />}
@@ -3496,6 +3510,8 @@ function callTypeLabel(type) {
     D_PLUS_1: 'D+1',
     D_PLUS_7: 'D+7',
     D_PLUS_13: 'D+13',
+    D_PLUS_93: 'D+93',
+    D_PLUS_183: 'D+183',
     D_PLUS_95: 'D+95',
     D_PLUS_185: 'D+185'
   })[type] || type;
@@ -3554,16 +3570,16 @@ function BulkTempAssignModal({ user, targets, latestLogByTarget, onClose, onSave
           temporary_assignee_store: user.store_name,
           temporary_assigned_by: user.name,
           temporary_assigned_at: now,
-          temporary_assign_reason: 'D+95/D+185 일괄 임시 배정'
+          temporary_assign_reason: 'D+93/D+183 일괄 임시 배정'
         }).eq('id', id);
         if (error) throw error;
       }
-      await writeAuditLog('임시처리자일괄변경', 'happycall_targets', user.store_name, user, `D+95/D+185 ${selectedIds.length}건 → ${assignee}`);
+      await writeAuditLog('임시처리자일괄변경', 'happycall_targets', user.store_name, user, `D+93/D+183 ${selectedIds.length}건 → ${assignee}`);
       alert(`임시 배정 완료: ${selectedIds.length}건`);
       onSaved();
       onClose();
     } catch (e) {
-      askErrorReport({ user, currentTab: '내 해피콜', actionName: 'D+95/D+185 일괄 임시 배정', error: e });
+      askErrorReport({ user, currentTab: '내 해피콜', actionName: 'D+93/D+183 일괄 임시 배정', error: e });
     } finally {
       setBusy(false);
     }
@@ -3572,17 +3588,17 @@ function BulkTempAssignModal({ user, targets, latestLogByTarget, onClose, onSave
   return (
     <div className="modalBg">
       <div className="modal bulkTempModal">
-        <div className="modalHead"><h2>D+95 / D+185 임시 배정</h2><button onClick={onClose}>닫기</button></div>
+        <div className="modalHead"><h2>D+93 / D+183 임시 배정</h2><button onClick={onClose}>닫기</button></div>
         <section>
           <div className="bulkTempToolbar">
-            <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}><option>전체</option><option>D+95</option><option>D+185</option></select>
+            <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}><option>전체</option><option>D+93</option><option>D+183</option></select>
             <select value={stateFilter} onChange={e=>setStateFilter(e.target.value)}><option>전체</option><option>미완료</option><option>반려</option></select>
             <select value={assignee} onChange={e=>setAssignee(e.target.value)}><option value="">임시 처리자 선택</option>{staffOptions.map(e => <option key={e.id || e.name} value={e.name}>{e.name}</option>)}</select>
             <button onClick={()=>setSelectedIds(list.map(t => t.id))}>전체 선택</button>
             <button onClick={()=>setSelectedIds([])}>선택 해제</button>
             <button className="primary" disabled={busy} onClick={saveBulk}>임시 배정 저장</button>
           </div>
-          <p className="muted">내 매장의 D+95/D+185 중 미완료 또는 반려 건만 표시됩니다. 대상일이 지난 미완료 건도 포함됩니다.</p>
+          <p className="muted">내 매장의 D+93/D+183 중 미완료 또는 반려 건만 표시됩니다. 대상일이 지난 미완료 건도 포함됩니다.</p>
           <p className="muted">표시 {list.length}건 / 선택 {selectedIds.length}건</p>
         </section>
         <section>
@@ -3593,10 +3609,10 @@ function BulkTempAssignModal({ user, targets, latestLogByTarget, onClose, onSave
                 const log = latestLogByTarget[t.id];
                 return <tr key={t.id}>
                   <td><input type="checkbox" checked={selectedIds.includes(t.id)} onChange={()=>toggle(t.id)} /></td>
-                  <td>{t.join_no}</td><td>{callTypeLabel(t.call_type)}</td><td>{t.target_date}</td><td>{t.assigned_employee}</td><td>{t.temporary_assignee || '-'}</td><td>{log?.review_status === '반려' ? '반려' : '미완료'}</td>
+                  <td>{t.join_no}</td><td>{callTypeLabel(t.call_type)}</td><td>{effectiveTargetDate(t)}</td><td>{t.assigned_employee}</td><td>{t.temporary_assignee || '-'}</td><td>{isFutureScheduledTarget(t) ? '처리 예정' : log?.review_status === '반려' ? '반려' : '미완료'}</td>
                 </tr>;
               })}
-              {!list.length && <tr><td colSpan="7" className="muted">임시 배정 가능한 D+95/D+185 건이 없습니다.</td></tr>}
+              {!list.length && <tr><td colSpan="7" className="muted">임시 배정 가능한 D+93/D+183 건이 없습니다.</td></tr>}
             </tbody>
           </table>
         </section>
@@ -3669,6 +3685,9 @@ function CallModal({ target, user, onClose, onSaved, readOnly = false }) {
   const [employees, setEmployees] = useState([]);
   const [tempAssignee, setTempAssignee] = useState(target.temporary_assignee || '');
   const [tempBusy, setTempBusy] = useState(false);
+  const [scheduledDate, setScheduledDate] = useState(target.scheduled_date || target.target_date || todayLocalISO());
+  const [scheduleReason, setScheduleReason] = useState(target.scheduled_change_reason || '');
+  const [scheduleBusy, setScheduleBusy] = useState(false);
   const latestLog = target.latestLog || null;
 
 useEffect(() => { loadDetail(); }, [target.id]);
@@ -3683,8 +3702,16 @@ useEffect(() => { loadDetail(); }, [target.id]);
   async function loadDetail() {
     const { data: h } = await supabase.from('customers').select('*').eq('join_no', target.join_no).order('open_date', { ascending: false });
     setHistory(h || []);
-    const { data: s } = await supabase.from('call_scripts').select('*').eq('call_type', target.call_type).maybeSingle();
-    setScript(s);
+    const legacyScriptType = target.call_type === 'D_PLUS_93' ? 'D_PLUS_95' : target.call_type === 'D_PLUS_183' ? 'D_PLUS_185' : target.call_type;
+    const { data: s } = await supabase.from('call_scripts').select('*').eq('call_type', legacyScriptType).maybeSingle();
+    setScript(s ? {
+      ...s,
+      title: target.call_type === 'D_PLUS_93'
+        ? String(s.title || '').replace('D+95', 'D+93')
+        : target.call_type === 'D_PLUS_183'
+          ? String(s.title || '').replace('D+185', 'D+183')
+          : s.title
+    } : null);
     const { data: e } = await supabase.from('employees').select('*').eq('status', '재직').order('name');
     setEmployees(e || []);
   }
@@ -3697,6 +3724,43 @@ useEffect(() => { loadDetail(); }, [target.id]);
 
   
   const canTempAssign = (user.role === '관리자' || user.role === '점장') && isD95D185Type(target.call_type);
+  const activeAssignee = target.temporary_assignee || target.assigned_employee;
+  const canReschedule = !latestLog && !readOnly && isD95D185Type(target.call_type) && activeAssignee === user.name;
+
+  async function saveScheduledDate(reset = false) {
+    if (!canReschedule) return alert('본인에게 배정된 D+93 / D+183 미완료 건만 처리 예정일을 변경할 수 있습니다.');
+    const baseDate = target.original_target_date || target.target_date;
+    const nextDate = reset ? null : scheduledDate;
+    if (!reset && !nextDate) return alert('처리 예정일을 선택해주세요.');
+    if (!reset && nextDate < todayLocalISO()) return alert('오늘 이전 날짜로는 변경할 수 없습니다.');
+    if (!reset && !scheduleReason.trim()) return alert('처리 예정일 변경 사유를 입력해주세요.');
+    if (!confirm(reset ? `처리 예정일을 원 대상일 ${baseDate}로 되돌릴까요?` : `실제 처리 예정일을 ${nextDate}로 변경할까요?`)) return;
+
+    setScheduleBusy(true);
+    try {
+      const payload = reset ? {
+        scheduled_date: null,
+        scheduled_changed_by: user.name,
+        scheduled_changed_at: new Date().toISOString(),
+        scheduled_change_reason: '원 대상일로 복원'
+      } : {
+        scheduled_date: nextDate,
+        scheduled_changed_by: user.name,
+        scheduled_changed_at: new Date().toISOString(),
+        scheduled_change_reason: scheduleReason.trim()
+      };
+      const { error } = await supabase.from('happycall_targets').update(payload).eq('id', target.id);
+      if (error) throw error;
+      await writeAuditLog('해피콜처리예정일변경', 'happycall_targets', target.id, user, `${callTypeLabel(target.call_type)} / ${baseDate} → ${nextDate || baseDate} / ${payload.scheduled_change_reason}`);
+      alert(reset ? '원 대상일로 되돌렸습니다.' : '처리 예정일이 변경되었습니다. 지정일 전에는 미완료로 집계되지 않습니다.');
+      onSaved();
+      onClose();
+    } catch (e) {
+      askErrorReport({ user, currentTab: '해피콜 상세', actionName: '처리 예정일 변경', joinNo: target.join_no, error: e });
+    } finally {
+      setScheduleBusy(false);
+    }
+  }
 
   const tempAssigneeOptions = useMemo(() => {
     return (employees || [])
@@ -3705,7 +3769,7 @@ useEffect(() => { loadDetail(); }, [target.id]);
   }, [employees, target.assigned_store, user.name]);
 
   async function saveTempAssignee() {
-    if (!canTempAssign) return alert('D+95 / D+185 건만 임시 처리자 변경이 가능합니다.');
+    if (!canTempAssign) return alert('D+93 / D+183 건만 임시 처리자 변경이 가능합니다.');
     if (!tempAssignee) return alert('임시 처리자를 선택해주세요.');
     if (!confirm(`${target.join_no} 건을 이번 1회만 ${tempAssignee}에게 임시 배정할까요?`)) return;
 
@@ -3716,7 +3780,7 @@ useEffect(() => { loadDetail(); }, [target.id]);
         temporary_assignee_store: target.assigned_store,
         temporary_assigned_by: user.name,
         temporary_assigned_at: new Date().toISOString(),
-        temporary_assign_reason: 'D+95/D+185 임시 처리자 변경'
+        temporary_assign_reason: 'D+93/D+183 임시 처리자 변경'
       }).eq('id', target.id);
       if (error) throw error;
 
@@ -3831,7 +3895,7 @@ async function save() {
           .eq('join_no', target.join_no)
           .neq('id', target.id)
           .is('is_skipped', false)
-          .not('call_type', 'in', '(D+95,D+185,d95,d185,D95,D185)');
+          .not('call_type', 'in', '(D_PLUS_93,D_PLUS_183,D_PLUS_95,D_PLUS_185)');
       } else {
         await supabase.from('refused_customers').delete().eq('join_no', target.join_no);
       }
@@ -3878,7 +3942,8 @@ async function save() {
           <h3>고객 기본정보</h3>
           <div className="infoGrid">
             <p><b>가입번호</b><br />{target.customer_name ? `${target.customer_name} (${target.join_no})` : target.join_no}</p>
-            <p><b>대상일</b><br />{target.target_date}</p>
+            <p><b>원 대상일</b><br />{target.original_target_date || target.target_date}</p>
+            <p><b>실제 처리 예정일</b><br />{effectiveTargetDate(target)}</p>
             {hasMinorInfo(latestLog || target) && <p><b>미성년자</b><br />{isActiveMinor(latestLog?.minor_birth_date || target.minor_birth_date) ? '예' : '생일 경과/확인 필요'}</p>}
             {(latestLog?.minor_birth_date || target.minor_birth_date) && <p><b>미성년자 생년월일</b><br />{latestLog?.minor_birth_date || target.minor_birth_date}</p>}
             {(latestLog?.legal_rep_join_no || target.legal_rep_join_no) && <p><b>법정대리인 가입번호</b><br />{latestLog?.legal_rep_join_no || target.legal_rep_join_no}</p>}
@@ -3887,9 +3952,21 @@ async function save() {
           </div>
         </section>
         <section><h3>배정 사유</h3><p className="reason">{target.assign_reason || target.skip_reason || '배정 사유 없음'}</p></section>
+        {canReschedule && (
+          <section className="scheduleEditSection">
+            <h3>D+93 / D+183 실제 처리 예정일</h3>
+            <div className="scheduleEditBox">
+              <label>처리 예정일<input type="date" min={todayLocalISO()} value={scheduledDate} onChange={e=>setScheduledDate(e.target.value)} /></label>
+              <label>변경 사유<input value={scheduleReason} onChange={e=>setScheduleReason(e.target.value)} placeholder="예: 고객 요청으로 5일 뒤 처리" /></label>
+              <button className="primary" disabled={scheduleBusy} onClick={()=>saveScheduledDate(false)}>처리 예정일 저장</button>
+              {target.scheduled_date && <button disabled={scheduleBusy} onClick={()=>saveScheduledDate(true)}>원 대상일로 되돌리기</button>}
+            </div>
+            <p className="muted">지정일 전에는 미완료·완료율에 포함되지 않으며, 처리 예정 목록에는 계속 표시됩니다.</p>
+          </section>
+        )}
         {canTempAssign && (
           <section>
-            <h3>D+95 / D+185 임시 처리자 변경</h3>
+            <h3>D+93 / D+183 임시 처리자 변경</h3>
             <div className="tempAssignBox">
               <select value={tempAssignee} onChange={e=>setTempAssignee(e.target.value)}>
                 <option value="">같은 매장 직원 선택</option>
@@ -5136,6 +5213,8 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
   const rows = useMemo(() => {
     const map = {};
     targets.forEach(t => {
+      const log = latestLogByTarget[t.id];
+      if (!log && effectiveTargetDate(t) > todayLocalISO()) return;
       const name = t.assigned_employee || '미지정';
       if (!map[name]) map[name] = {
         name,
@@ -5153,10 +5232,9 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
       };
 
       const r = map[name];
-      const log = latestLogByTarget[t.id];
       r.total += 1;
 
-      if (t.target_date === todayLocalISO()) {
+      if (effectiveTargetDate(t) === todayLocalISO()) {
         r.todayTotal += 1;
         if (log) r.todayDone += 1;
       }
@@ -5169,7 +5247,7 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
         if (log.call_detail === '불만사항있음') r.voc += 1;
       } else {
         r.pending += 1;
-        if (diffDays(t.target_date) > 0) r.overdue += 1;
+        if (diffDays(effectiveTargetDate(t)) > 0) r.overdue += 1;
       }
     });
 
@@ -5212,6 +5290,7 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
 
     const sumTotal = list.reduce((a,r)=>a+r.total,0);
     const sumDone = list.reduce((a,r)=>a+r.done,0);
+    const sumPending = list.reduce((a,r)=>a+r.pending,0);
     const rate = sumTotal ? Math.round(sumDone / sumTotal * 1000) / 10 : 0;
 
     const scale = 2;
@@ -5274,11 +5353,12 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
     const tableX = marginX;
     const tableW = width - (marginX * 2);
     const cols = [
-      { label: '인원', x: tableX + 18, w: 190 },
-      { label: '매장', x: tableX + 232, w: 126 },
-      { label: '대상건', x: tableX + 390, w: 112 },
-      { label: '완료건', x: tableX + 530, w: 112 },
-      { label: '완료율', x: tableX + 670, w: 140 },
+      { label: '인원', x: tableX + 18, w: 170 },
+      { label: '매장', x: tableX + 206, w: 110 },
+      { label: '대상건', x: tableX + 336, w: 90 },
+      { label: '완료건', x: tableX + 446, w: 90 },
+      { label: '미완료', x: tableX + 556, w: 90 },
+      { label: '완료율', x: tableX + 674, w: 150 },
     ];
 
     ctx.fillStyle = '#111827';
@@ -5307,10 +5387,18 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
       ctx.fillText(ellipsis(r.store || '-', cols[1].w), cols[1].x, yText);
       ctx.fillText(`${r.total}건`, cols[2].x, yText);
       ctx.fillText(`${r.done}건`, cols[3].x, yText);
-
-      ctx.fillStyle = rRate >= 80 ? '#166534' : rRate >= 50 ? '#9a3412' : '#991b1b';
+      ctx.fillStyle = '#dc2626';
       ctx.font = 'bold 15px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-      ctx.fillText(`${rRate}%`, cols[4].x, yText);
+      ctx.fillText(`${r.pending}건`, cols[4].x, yText);
+
+      const rateBg = rRate >= 80 ? '#fef3c7' : rRate >= 50 ? '#ffedd5' : '#fee2e2';
+      const rateColor = rRate >= 80 ? '#92400e' : rRate >= 50 ? '#9a3412' : '#991b1b';
+      ctx.fillStyle = rateBg;
+      roundRect(cols[5].x - 10, yTop + 11, 92, 30, 15);
+      ctx.fill();
+      ctx.fillStyle = rateColor;
+      ctx.font = 'bold 15px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      ctx.fillText(`${rRate}%`, cols[5].x, yText);
     });
 
     const footerY = tableTop + headerH + (list.length * rowH) + 18;
@@ -5322,7 +5410,10 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
     ctx.font = 'bold 16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     ctx.fillText(`총 대상 ${sumTotal}건`, tableX + 20, footerY + 31);
     ctx.fillText(`총 완료 ${sumDone}건`, tableX + 190, footerY + 31);
-    ctx.fillText(`전체 완료율 ${rate}%`, tableX + 360, footerY + 31);
+    ctx.fillStyle = '#b91c1c';
+    ctx.fillText(`총 미완료 ${sumPending}건`, tableX + 350, footerY + 31);
+    ctx.fillStyle = '#1e3a8a';
+    ctx.fillText(`전체 완료율 ${rate}%`, tableX + 540, footerY + 31);
 
     canvas.toBlob(async (blob) => {
       if (!blob) return alert('이미지 생성에 실패했습니다.');
@@ -5763,7 +5854,7 @@ function HappycallAssignmentStatus({ user }) {
                           <td>{formatCustomerJoinNo(t.join_no, customersByJoinNo, t.customer_name)}</td>
                           <td>{customerDisplayName(c)}</td>
                           <td>{displayStoreNameForUi(currentAssigneeStore(t)) || '-'}</td>
-                          <td>{t.target_date || '-'}</td>
+                          <td>{effectiveTargetDate(t) || '-'}</td>
                           <td>{callTypeLabel(t.call_type || t.target_type || '-')}</td>
                           <td>{state}</td>
                         </tr>
@@ -6014,7 +6105,7 @@ function ReviewDashboard({ user }) {
                 <td>{log.memo ? '있음' : '-'}</td>
                 <td>{log.review_status || '검수대기'}</td>
                 <td>{formatKST(log.checked_at)}</td>
-                <td>{target.target_date}</td>
+                <td>{effectiveTargetDate(target)}</td>
               </tr>
             ))}
             {!loading && !reviewRows.length && <tr><td colSpan="9"><EmptyStateText>조건에 맞는 검수 건이 없습니다.</EmptyStateText></td></tr>}
@@ -6115,7 +6206,7 @@ function ReviewModal({ item, user, onClose, onSaved }) {
             {hasMinorInfo(log) && <p><b>미성년자 생년월일</b><br />{log.minor_birth_date || '미입력'}</p>}
             <p><b>담당자</b><br />{target.assigned_employee}</p>
             <p><b>매장</b><br />{target.assigned_store}</p>
-            <p><b>대상일</b><br />{target.target_date}</p>
+            <p><b>대상일</b><br />{effectiveTargetDate(target)}</p>
             <p><b>완료일시</b><br />{formatKST(log.checked_at)}</p>
             <p><b>검수일시</b><br />{log.reviewed_at ? formatKST(log.reviewed_at) : '-'}</p>
           </div>
@@ -6536,7 +6627,7 @@ function normalizeStoreNameForAssignment(v) {
   return String(v || '').trim();
 }
 
-const HAPPY_CALL_EXCLUDED_STORES = new Set(['사무실', '에스플러스', '퍼스트']);
+const HAPPY_CALL_EXCLUDED_STORES = new Set(['사무실', '에스플러스', '퍼스트', '주주백석', '에스플러스(이성범)']);
 
 function isHappycallExcludedStore(storeName) {
   const normalized = String(storeName || '').replace(/\s+/g, '').trim();
@@ -6549,7 +6640,7 @@ function isHappycallExcludedCustomer(customer = {}) {
 }
 
 function isD95D185Type(callType) {
-  return callType === 'D_PLUS_95' || callType === 'D_PLUS_185';
+  return ['D_PLUS_93', 'D_PLUS_183', 'D_PLUS_95', 'D_PLUS_185'].includes(callType);
 }
 
 function isActiveEmployee(emp) {
@@ -6614,7 +6705,7 @@ function resolveD95D185Assignee({ customer, employees, employeeHistories }) {
     return {
       assigned_store: normalizeStoreNameForAssignment(seller.store_name || storeName),
       assigned_employee: seller.name,
-      reason: 'D+95/D+185 재직 판매자 본인 배정'
+      reason: 'D+93/D+183 재직 판매자 본인 배정'
     };
   }
 
@@ -6629,7 +6720,7 @@ function resolveD95D185Assignee({ customer, employees, employeeHistories }) {
     return {
       assigned_store: normalizeStoreNameForAssignment(historical.employee.store_name || storeName),
       assigned_employee: historical.employee.name,
-      reason: 'D+95/D+185 퇴사자건 / 개통일 당시 점장 배정'
+      reason: 'D+93/D+183 퇴사자건 / 개통일 당시 점장 배정'
     };
   }
 
@@ -6638,14 +6729,14 @@ function resolveD95D185Assignee({ customer, employees, employeeHistories }) {
     return {
       assigned_store: normalizeStoreNameForAssignment(currentManager.store_name || storeName),
       assigned_employee: currentManager.name,
-      reason: 'D+95/D+185 퇴사자건 / 현재 매장 점장 배정'
+      reason: 'D+93/D+183 퇴사자건 / 현재 매장 점장 배정'
     };
   }
 
   return {
     assigned_store: storeName,
     assigned_employee: '',
-    reason: 'D+95/D+185 퇴사자건 / 배정 가능한 점장 없음'
+    reason: 'D+93/D+183 퇴사자건 / 배정 가능한 점장 없음'
   };
 }
 
@@ -6712,6 +6803,8 @@ function dedupeHappycallTargets(rows) {
     'D_PLUS_1': 1,
     'D_PLUS_7': 2,
     'D_PLUS_13': 3,
+    'D_PLUS_93': 4,
+    'D_PLUS_183': 5,
     'D_PLUS_95': 4,
     'D_PLUS_185': 5,
     'MONTHLY_DAY': 9
@@ -6860,8 +6953,8 @@ function TargetGenerator({ user }) {
         { days: 1, type: 'D_PLUS_1' },
         { days: 7, type: 'D_PLUS_7' },
         { days: 13, type: 'D_PLUS_13' },
-        { days: 95, type: 'D_PLUS_95' },
-        { days: 185, type: 'D_PLUS_185' }
+        { days: 93, type: 'D_PLUS_93' },
+        { days: 183, type: 'D_PLUS_183' }
       ];
 
       const targetMonthText = targetMonth(targetDate);
@@ -6890,6 +6983,7 @@ function TargetGenerator({ user }) {
               customer_name: c.customer_name,
               customer_id: c.id,
               target_date: targetDate,
+              original_target_date: targetDate,
               target_month: targetMonthText,
               call_type: p.type,
               assigned_store: a.assigned_store,
@@ -6917,6 +7011,7 @@ function TargetGenerator({ user }) {
           customer_name: c.customer_name,
           customer_id: c.id,
           target_date: targetDate,
+          original_target_date: targetDate,
           target_month: targetMonthText,
           call_type: 'MONTHLY_DAY',
           assigned_store: a.assigned_store,
@@ -7102,8 +7197,8 @@ function TargetGenerator({ user }) {
       <LastAuditNotice action="해피콜대상저장" label="마지막 해피콜 대상 저장" />
       {user.role === '관리자' && <button className="dangerBtn" onClick={deleteGeneratedTargetsForDate} disabled={busy}>당일 생성 해피콜 삭제</button>}
       <div className="uploadBox">
-        <p className="muted">대상일 기준으로 D+1, D+7, D+13, D+95, D+185와 월간 정기 해피콜을 생성합니다.</p>
-        <p className="muted">D+95/D+185는 판매자 재직 시 본인 배정, 판매자 퇴사 시 근무이력 기준 당시 점장 또는 현재 매장 점장에게 배정됩니다.</p>
+        <p className="muted">대상일 기준으로 D+1, D+7, D+13, D+93, D+183과 월간 정기 해피콜을 생성합니다.</p>
+        <p className="muted">D+93/D+183은 판매자 재직 시 본인 배정, 판매자 퇴사 시 근무이력 기준 당시 점장 또는 현재 매장 점장에게 배정됩니다.</p>
         <p className="muted">당월 D+ 해피콜이 있는 고객은 해당 월의 월간 정기 해피콜에서 제외됩니다.</p>
         <p className="muted">월 정기 해피콜은 홀수달 개통 고객은 홀수달, 짝수달 개통 고객은 짝수달에만 생성됩니다.</p>
         <p className="muted">일요일 자동 생성은 서버 스케줄러가 KST 오전 9시에 실행하며, 토요일 개통 D+1은 월요일 생성 시 자동 보정됩니다.</p>
@@ -7230,7 +7325,7 @@ function ManagerStoreDashboard({ user }) {
       <div className="sectionCard">
         <h3>매장 해피콜 리스트</h3>
         <table><thead><tr><th>가입번호</th><th>법정대리인</th><th>담당자</th><th>유형</th><th>대상일</th><th>상태</th><th>결과</th></tr></thead>
-        <tbody>{targets.map(t => { const log = latestLogByTarget[t.id]; return <tr key={t.id} onClick={()=>setSelected({ ...t, latestLog: latestLogByTarget[t.id] || null })} className="clickableRow"><td>{t.join_no}</td><td>{t.assigned_employee}</td><td>{callTypeLabel(t.call_type)}</td><td>{t.target_date}</td><td>{log ? '완료' : '미완료'}</td><td>{log ? `${log.call_result} / ${log.call_detail}` : '-'}</td></tr> })}</tbody></table>
+        <tbody>{targets.map(t => { const log = latestLogByTarget[t.id]; return <tr key={t.id} onClick={()=>setSelected({ ...t, latestLog: latestLogByTarget[t.id] || null })} className="clickableRow"><td>{t.join_no}</td><td>{t.assigned_employee}</td><td>{callTypeLabel(t.call_type)}</td><td>{effectiveTargetDate(t)}</td><td>{isFutureScheduledTarget(t) ? '처리 예정' : log ? '완료' : '미완료'}</td><td>{log ? `${log.call_result} / ${log.call_detail}` : '-'}</td></tr> })}</tbody></table>
       </div>
       {selected && <CallModal target={selected} user={user} onClose={() => setSelected(null)} onSaved={load} readOnly={true} />}
       </>)}
@@ -7274,16 +7369,17 @@ function ManagerStoreDashboardV6({ user }) {
   const byEmployee = useMemo(() => {
     const map = {};
     targets.forEach(t => {
+      const log = latestLogByTarget[t.id];
+      if (!log && effectiveTargetDate(t) > todayLocalISO()) return;
       const k = t.assigned_employee || '미지정';
       if (!map[k]) map[k] = { name:k,total:0,done:0,todayTotal:0,todayDone:0,overdue:0,voc:0 };
       map[k].total++;
-      const log = latestLogByTarget[t.id];
       if (log) map[k].done++;
-      if (t.target_date === todayLocalISO()) {
+      if (effectiveTargetDate(t) === todayLocalISO()) {
         map[k].todayTotal++;
         if (log) map[k].todayDone++;
       }
-      if (!log && diffDays(t.target_date) > 0) map[k].overdue++;
+      if (!log && diffDays(effectiveTargetDate(t)) > 0) map[k].overdue++;
       if (log?.call_detail === '불만사항있음') map[k].voc++;
     });
     return Object.values(map).sort((a,b)=>String(a.name).localeCompare(String(b.name),'ko'));
@@ -7291,9 +7387,9 @@ function ManagerStoreDashboardV6({ user }) {
 
   const filteredTargets = useMemo(() => {
     let list = [...targets];
-    if (filter === '경과미완료') list = list.filter(t => !latestLogByTarget[t.id] && diffDays(t.target_date) > 0);
-    else if (filter === '오늘신규') list = list.filter(t => t.target_date === todayLocalISO());
-    else if (filter === '미완료전체') list = list.filter(t => !latestLogByTarget[t.id]);
+    if (filter === '경과미완료') list = list.filter(t => !latestLogByTarget[t.id] && diffDays(effectiveTargetDate(t)) > 0);
+    else if (filter === '오늘신규') list = list.filter(t => effectiveTargetDate(t) === todayLocalISO());
+    else if (filter === '미완료전체') list = list.filter(t => !latestLogByTarget[t.id] && effectiveTargetDate(t) <= todayLocalISO());
     else if (filter === '완료') list = list.filter(t => latestLogByTarget[t.id]);
     return list.sort((a,b)=>sortTargetsByPriority(a,b,latestLogByTarget));
   }, [targets, latestLogByTarget, filter]);
@@ -7341,7 +7437,7 @@ function ManagerStoreDashboardV6({ user }) {
           <button className={filter==='경과미완료'?'active':''} onClick={()=>setFilter('경과미완료')}>경과 미완료 {stats.overdue}</button>
           <button className={filter==='오늘신규'?'active':''} onClick={()=>setFilter('오늘신규')}>오늘 신규 {stats.todayTotal}</button>
           <button className={filter==='완료'?'active':''} onClick={()=>setFilter('완료')}>완료 {stats.done}</button>
-          <button className={filter==='전체'?'active':''} onClick={()=>setFilter('전체')}>전체 {stats.total}</button>
+          <button className={filter==='전체'?'active':''} onClick={()=>setFilter('전체')}>전체 {stats.allTotal}</button>
         </div>
         <table>
           <thead><tr><th>가입번호</th><th>담당자</th><th>유형</th><th>대상일</th><th>상태</th><th>결과</th></tr></thead>
@@ -7350,7 +7446,7 @@ function ManagerStoreDashboardV6({ user }) {
               const log = latestLogByTarget[t.id];
               return (
                 <tr key={t.id} onClick={()=>setSelected({ ...t, latestLog: latestLogByTarget[t.id] || null })} className="clickableRow">
-                  <td>{t.join_no}</td><td>{t.assigned_employee}</td><td>{callTypeLabel(t.call_type)}</td><td>{t.target_date}</td>
+                  <td>{t.join_no}</td><td>{t.assigned_employee}</td><td>{callTypeLabel(t.call_type)}</td><td>{effectiveTargetDate(t)}</td>
                   <td><StatusBadge target={t} log={log} /></td>
                   <td>{log ? `${log.call_result} / ${log.call_detail}` : '-'}</td>
                 </tr>
