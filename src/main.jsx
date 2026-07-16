@@ -4,14 +4,14 @@ import { createPortal } from 'react-dom';
 import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
-import { createClientUuid, runNetworkMutation } from './networkMutation.js';
+import { createClientUuid, runNetworkMutation, runNetworkRead } from './networkMutation.js';
 import {
   isActiveEmployeeSession,
   resolveJichukRetiredSellerRule,
   sanitizeStoredEmployee
 } from './stage1Rules.js';
 
-const APP_BUILD_VERSION = 'V29.50';
+const APP_BUILD_VERSION = 'V29.51';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -25,11 +25,11 @@ async function fetchAllRows(tableName, selectText = '*', orderColumn = null) {
   let allRows = [];
 
   while (true) {
-    let query = supabase.from(tableName).select(selectText).range(from, from + pageSize - 1);
-    if (orderColumn) query = query.order(orderColumn, { ascending: true });
-
-    const { data, error } = await query;
-    if (error) throw error;
+    const { data } = await runNetworkRead(() => {
+      let query = supabase.from(tableName).select(selectText).range(from, from + pageSize - 1);
+      if (orderColumn) query = query.order(orderColumn, { ascending: true });
+      return query;
+    });
 
     const rows = data || [];
     allRows = allRows.concat(rows);
@@ -45,18 +45,64 @@ async function fetchRowsByIds(tableName, ids, selectText = '*', chunkSize = 100)
   const uniqueIds = [...new Set((ids || []).filter(Boolean))];
   const allRows = [];
 
+  const chunks = [];
   for (let index = 0; index < uniqueIds.length; index += chunkSize) {
-    const chunk = uniqueIds.slice(index, index + chunkSize);
-    const { data, error } = await supabase
-      .from(tableName)
-      .select(selectText)
-      .in('id', chunk);
-    if (error) throw error;
-    allRows.push(...(data || []));
+    chunks.push(uniqueIds.slice(index, index + chunkSize));
+  }
+  for (let index = 0; index < chunks.length; index += 4) {
+    const groupRows = await Promise.all(chunks.slice(index, index + 4).map(async chunk => {
+      const { data } = await runNetworkRead(() => supabase
+        .from(tableName)
+        .select(selectText)
+        .in('id', chunk));
+      return data || [];
+    }));
+    groupRows.forEach(rows => allRows.push(...rows));
   }
 
   return allRows;
 }
+
+async function fetchRowsByValues(tableName, columnName, values, selectText = '*', chunkSize = 100) {
+  const uniqueValues = [...new Set((values || []).filter(Boolean))];
+  const allRows = [];
+
+  const chunks = [];
+  for (let index = 0; index < uniqueValues.length; index += chunkSize) {
+    chunks.push(uniqueValues.slice(index, index + chunkSize));
+  }
+  for (let index = 0; index < chunks.length; index += 4) {
+    const groupRows = await Promise.all(chunks.slice(index, index + 4).map(async chunk => {
+      const { data } = await runNetworkRead(() => supabase
+        .from(tableName)
+        .select(selectText)
+        .in(columnName, chunk));
+      return data || [];
+    }));
+    groupRows.forEach(rows => allRows.push(...rows));
+  }
+
+  return allRows;
+}
+
+const HAPPY_CALL_TARGET_LIST_COLUMNS = [
+  'id','join_no','customer_id','customer_name','target_date','target_month','call_type',
+  'assigned_store','assigned_employee','is_skipped','skip_reason','created_at',
+  'temporary_assignee','temporary_assignee_store','temporary_assigned_by','temporary_assigned_at',
+  'temporary_assign_reason','legal_rep_join_no','is_minor','minor_birth_date',
+  'original_target_date','scheduled_date','scheduled_changed_by','scheduled_changed_at','scheduled_change_reason'
+].join(',');
+
+const HAPPY_CALL_LOG_LIST_COLUMNS = [
+  'id','target_id','join_no','employee_name','call_result','call_detail','memo','checked_by','checked_at',
+  'review_status','reviewed_by','reviewed_at','review_memo','legal_rep_join_no','customer_name',
+  'is_minor','minor_birth_date','review_round','parent_log_id'
+].join(',');
+
+const CUSTOMER_DISPLAY_COLUMNS = 'id,join_no,customer_name,open_date,store_name,raw_store_name,seller_name';
+const REFUSED_CUSTOMER_LIST_COLUMNS = 'id,join_no,target_id,refused_by,refused_at,memo,customer_name,is_minor,minor_birth_date';
+const FREEPASS_LEDGER_LIST_COLUMNS = 'id,employee_id,employee_name,employee_store,type,hours,reason,effective_date,created_by,created_at,source_request_id,reset_cycle';
+const FREEPASS_REQUEST_LOG_COLUMNS = 'id,employee_name,employee_store,request_type,request_date,hours,reason,status,requested_at,created_at,manager_approved_by,final_approved_by';
 
 
 const CALL_RESULTS = {
@@ -1894,6 +1940,7 @@ function FreepassLogTab({ user }) {
   const [loading,setLoading]=useState(true);
   const [processingId,setProcessingId]=useState(null);
   const [selectedLog, setSelectedLog] = useState(null);
+  const [page,setPage]=useState(1);
 
   useEffect(()=>{ load(); },[]);
 
@@ -1901,13 +1948,14 @@ function FreepassLogTab({ user }) {
     setLoading(true);
     try{
       const [ledgerRes, requestRes, empRes] = await Promise.all([
-        supabase.from('freepass_ledger').select('*').order('created_at',{ascending:false}),
-        supabase.from('freepass_requests').select('*').order('requested_at',{ascending:false}),
-        supabase.from('employees').select('*').order('store_name')
+        runNetworkRead(() => supabase.from('freepass_ledger').select(FREEPASS_LEDGER_LIST_COLUMNS).order('created_at',{ascending:false})),
+        runNetworkRead(() => supabase.from('freepass_requests').select(FREEPASS_REQUEST_LOG_COLUMNS).order('requested_at',{ascending:false})),
+        runNetworkRead(() => supabase.from('employees').select('id,name,store_name,status,role').order('store_name'))
       ]);
       setLedger(ledgerRes.data || []);
       setRequests(requestRes.data || []);
       setEmployees(empRes.data || []);
+      setPage(1);
     }catch(e){
       askErrorReport({user,currentTab:'프리패스 로그',actionName:'로그 조회',error:e});
     }finally{
@@ -1962,6 +2010,9 @@ function FreepassLogTab({ user }) {
     if(!q) return true;
     return `${r.store||''} ${r.employee||''} ${r.type||''} ${r.detail||''} ${r.actor||''}`.toLowerCase().includes(q);
   });
+  useEffect(()=>{setPage(1);},[keyword,storeFilter,typeFilter]);
+  const pageSize=100;
+  const pageLogs=filtered.slice((page-1)*pageSize,page*pageSize);
 
   return (
     <div className="sectionCard freepassLogTab">
@@ -1982,7 +2033,7 @@ function FreepassLogTab({ user }) {
         <thead><tr><th>유형</th><th>시간</th><th>요청일시</th><th>실제일</th><th>매장</th><th>직원</th><th>내용</th><th>처리자</th></tr></thead>
         <tbody>
           {loading && <tr><td colSpan="8"><InlineLoadingState /></td></tr>}
-            {!loading && filtered.map(r=><tr key={r.id}>
+            {!loading && pageLogs.map(r=><tr key={r.id}>
             <td>{r.type}</td>
             <td>{freepassLedgerSignedHours(r)}시간</td>
             <td>{r.requestedAt || formatKST(r.at)}</td>
@@ -1997,7 +2048,7 @@ function FreepassLogTab({ user }) {
       </table>
       <div className="mobileCardList freepassMobileLogList">
         {loading && <InlineLoadingState />}
-        {!loading && filtered.map(r => (
+        {!loading && pageLogs.map(r => (
           <MobileInfoCard
             key={r.id}
             title={`${r.employee || '-'} · ${r.type}`}
@@ -2009,6 +2060,7 @@ function FreepassLogTab({ user }) {
         ))}
         {!loading && !filtered.length && <EmptyStateText>표시할 로그가 없습니다.</EmptyStateText>}
       </div>
+      <PaginationBar total={filtered.length} page={page} onPageChange={setPage} pageSize={pageSize} />
     </div>
   );
 }
@@ -2206,9 +2258,9 @@ function FreepassStoreOverview({ user }) {
     setLoading(true);
     try{
       const [ledgerRes, reqRes, empRes] = await Promise.all([
-        supabase.from('freepass_ledger').select('*').order('created_at',{ascending:false}),
-        supabase.from('freepass_requests').select('*').order('requested_at',{ascending:false}),
-        supabase.from('employees').select('*').eq('status','재직').order('name')
+        runNetworkRead(() => supabase.from('freepass_ledger').select(FREEPASS_LEDGER_LIST_COLUMNS).order('created_at',{ascending:false})),
+        runNetworkRead(() => supabase.from('freepass_requests').select(FREEPASS_REQUEST_LOG_COLUMNS).order('requested_at',{ascending:false})),
+        runNetworkRead(() => supabase.from('employees').select('id,name,store_name,status,role').eq('status','재직').order('name'))
       ]);
       const e = empRes.data || [];
       const visibleEmployees = isAdminLike(user) ? e : e.filter(emp => emp.store_name === user.store_name);
@@ -2424,8 +2476,10 @@ function FreepassOverview({ user }) {
   const [ledger,setLedger]=useState([]),[employees,setEmployees]=useState([]);
   useEffect(()=>{ load(); },[]);
   async function load(){
-    const {data:l}=await supabase.from('freepass_ledger').select('*').order('created_at',{ascending:false});
-    const {data:e}=await supabase.from('employees').select('*').eq('status','재직').order('store_name');
+    const [{data:l},{data:e}] = await Promise.all([
+      runNetworkRead(() => supabase.from('freepass_ledger').select(FREEPASS_LEDGER_LIST_COLUMNS).order('created_at',{ascending:false})),
+      runNetworkRead(() => supabase.from('employees').select('id,name,store_name,status,role').eq('status','재직').order('store_name'))
+    ]);
     setLedger(l||[]);
     setEmployees(e||[]);
   }
@@ -3251,6 +3305,18 @@ function EmptyStateText({ children }) {
   return <div className="freepassStateBox">{children}</div>;
 }
 
+function PaginationBar({ total, page, onPageChange, pageSize = 100 }) {
+  const totalPages = Math.max(1, Math.ceil(Number(total || 0) / pageSize));
+  if (totalPages <= 1) return null;
+  return (
+    <div className="paginationBar" aria-label="목록 페이지 이동">
+      <button type="button" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>이전</button>
+      <span>{page} / {totalPages} 페이지 · 총 {total}건</span>
+      <button type="button" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>다음</button>
+    </div>
+  );
+}
+
 function MobileInfoCard({ title, subtitle, meta = [], status, badgeClass = '', onClick, children }) {
   return (
     <button type="button" className="mobileInfoCard" onClick={onClick}>
@@ -3477,10 +3543,22 @@ function Dashboard({ user }) {
 
   async function load() {
     try {
-      const allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
-      const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
+      let allTargets;
+      if (user?.role === '점장') {
+        const { data } = await runNetworkRead(() => supabase
+          .from('happycall_targets')
+          .select(HAPPY_CALL_TARGET_LIST_COLUMNS)
+          .eq('assigned_store', user.store_name)
+          .order('target_date', { ascending: true }));
+        allTargets = data || [];
+      } else {
+        allTargets = await fetchAllRows('happycall_targets', HAPPY_CALL_TARGET_LIST_COLUMNS, 'target_date');
+      }
       let visible = (allTargets || []).filter(isVisibleHappycallTarget);
       if (user?.role === '점장') visible = visible.filter(t => t.assigned_store === user.store_name);
+      const allLogs = user?.role === '점장'
+        ? await fetchRowsByValues('happycall_logs', 'target_id', visible.map(t => t.id), HAPPY_CALL_LOG_LIST_COLUMNS)
+        : await fetchAllRows('happycall_logs', HAPPY_CALL_LOG_LIST_COLUMNS, 'checked_at');
       setTargets(visible);
       setLogs(allLogs || []);
     } catch (e) {
@@ -3547,13 +3625,31 @@ function CallList({ user, mode, readOnly = false }) {
   const [bulkTempOpen, setBulkTempOpen] = useState(false);
   const [storeFilter, setStoreFilter] = useState('전체');
   const [employeeFilter, setEmployeeFilter] = useState('전체');
+  const [page, setPage] = useState(1);
 
   useEffect(() => { load(); }, [mode]);
 
   async function load() {
     setLoading(true);
     try {
-      let allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
+      let allTargets;
+      if (mode === 'mine') {
+        const { data } = await runNetworkRead(() => supabase
+          .from('happycall_targets')
+          .select(HAPPY_CALL_TARGET_LIST_COLUMNS)
+          .or(`temporary_assignee.eq.${user.name},assigned_employee.eq.${user.name}`)
+          .order('target_date', { ascending: true }));
+        allTargets = data || [];
+      } else if (mode === 'store') {
+        const { data } = await runNetworkRead(() => supabase
+          .from('happycall_targets')
+          .select(HAPPY_CALL_TARGET_LIST_COLUMNS)
+          .eq('assigned_store', user.store_name)
+          .order('target_date', { ascending: true }));
+        allTargets = data || [];
+      } else {
+        allTargets = await fetchAllRows('happycall_targets', HAPPY_CALL_TARGET_LIST_COLUMNS, 'target_date');
+      }
       let visible = (allTargets || []).filter(isVisibleHappycallTarget);
       if (mode === 'mine') {
         visible = visible.filter(t => {
@@ -3562,11 +3658,18 @@ function CallList({ user, mode, readOnly = false }) {
         });
       }
       if (mode === 'store') visible = visible.filter(t => t.assigned_store === user.store_name);
-      const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
-      const customers = await fetchAllRows('customers', '*', 'open_date');
+      const targetIds = visible.map(t => t.id);
+      const joinNos = visible.map(t => t.join_no);
+      const allLogs = mode === 'all'
+        ? await fetchAllRows('happycall_logs', HAPPY_CALL_LOG_LIST_COLUMNS, 'checked_at')
+        : await fetchRowsByValues('happycall_logs', 'target_id', targetIds, HAPPY_CALL_LOG_LIST_COLUMNS);
+      const customers = mode === 'all'
+        ? await fetchAllRows('customers', CUSTOMER_DISPLAY_COLUMNS, 'open_date')
+        : await fetchRowsByValues('customers', 'join_no', joinNos, CUSTOMER_DISPLAY_COLUMNS, 250);
       setCustomersByJoinNo(Object.fromEntries((customers || []).map(c => [c.join_no, c])));
       setTargets(visible);
       setLogs(allLogs || []);
+      setPage(1);
     } catch (e) {
       alert('해피콜 리스트 조회 오류: ' + e.message);
     } finally {
@@ -3606,6 +3709,10 @@ function CallList({ user, mode, readOnly = false }) {
     else if (filter === '완료') list = list.filter(t => latestLogByTarget[t.id] && latestLogByTarget[t.id]?.review_status !== '반려');
     return list.sort((a,b)=>sortTargetsByPriority(a,b,latestLogByTarget));
   }, [targets, latestLogByTarget, filter, mode, storeFilter, employeeFilter]);
+
+  useEffect(() => { setPage(1); }, [filter, storeFilter, employeeFilter, mode]);
+  const pageSize = 100;
+  const pageTargets = filteredTargets.slice((page - 1) * pageSize, page * pageSize);
 
   const title = mode === 'mine' ? '내 해피콜 리스트' : mode === 'store' ? `${user.store_name} 해피콜 진행현황` : '전체 해피콜 리스트';
 
@@ -3649,7 +3756,7 @@ function CallList({ user, mode, readOnly = false }) {
         </div>
       )}
       <div className="list">
-        {filteredTargets.map(t => {
+        {pageTargets.map(t => {
           const log = latestLogByTarget[t.id];
           return (
             <div className="callItem" key={t.id} onClick={()=>setSelected({ ...t, latestLog: latestLogByTarget[t.id] || null })}>
@@ -3664,6 +3771,7 @@ function CallList({ user, mode, readOnly = false }) {
           );
         })}
       </div>
+      <PaginationBar total={filteredTargets.length} page={page} onPageChange={setPage} pageSize={pageSize} />
       {selected && <CallModal target={selected} user={user} onClose={()=>setSelected(null)} onSaved={load} readOnly={readOnly} />}
       {bulkTempOpen && <BulkTempAssignModal user={user} targets={targets} latestLogByTarget={latestLogByTarget} onClose={()=>setBulkTempOpen(false)} onSaved={load} />}
       </>)}
@@ -4816,14 +4924,20 @@ function WorkHistoryInner({ employee, stores, user }) {
 function RefusedCustomersViewer() {
   const [rows, setRows] = useState([]);
   const [customersByJoinNo, setCustomersByJoinNo] = useState({});
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
+    setLoading(true);
     try {
-      const refusedRows = await fetchAllRows('refused_customers', '*', 'refused_at');
-      const logs = await fetchAllRows('happycall_logs', '*', 'checked_at');
-      const customers = await fetchAllRows('customers', '*', 'open_date');
+      const refusedRows = await fetchAllRows('refused_customers', REFUSED_CUSTOMER_LIST_COLUMNS, 'refused_at');
+      const joinNos = (refusedRows || []).map(r => r.join_no);
+      const [logs, customers] = await Promise.all([
+        fetchRowsByValues('happycall_logs', 'join_no', joinNos, HAPPY_CALL_LOG_LIST_COLUMNS),
+        fetchRowsByValues('customers', 'join_no', joinNos, CUSTOMER_DISPLAY_COLUMNS, 250)
+      ]);
       setCustomersByJoinNo(Object.fromEntries((customers || []).map(c => [c.join_no, c])));
 
       const latestByJoinNo = {};
@@ -4848,10 +4962,16 @@ function RefusedCustomersViewer() {
       }));
 
       setRows(activeRows.sort((a,b)=>String(b.refused_at || '').localeCompare(String(a.refused_at || ''))));
+      setPage(1);
     } catch (e) {
       alert('통화 불가 고객 조회 오류: ' + e.message);
+    } finally {
+      setLoading(false);
     }
   }
+
+  const pageSize = 100;
+  const pageRows = rows.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <div>
@@ -4868,7 +4988,8 @@ function RefusedCustomersViewer() {
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
+            {loading && <tr><td colSpan="5"><InlineLoadingState /></td></tr>}
+            {!loading && pageRows.map(r => (
               <tr key={r.id || r.join_no}>
                 <td>{formatCustomerJoinNo(r.join_no, customersByJoinNo, r.customer_name)}</td>
                 <td>{formatKST(r.refused_at)}</td>
@@ -4877,9 +4998,10 @@ function RefusedCustomersViewer() {
                 <td>{r.latestLog ? `${r.latestLog.call_result} / ${r.latestLog.call_detail}` : '-'} {hasMinorInfo(r.latestLog || r) && isActiveMinor((r.latestLog || r).minor_birth_date) && <span className="minorBadge">미성년자</span>}</td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan="5" className="muted">통화 불가 고객이 없습니다.</td></tr>}
+            {!loading && !rows.length && <tr><td colSpan="5" className="muted">통화 불가 고객이 없습니다.</td></tr>}
           </tbody>
         </table>
+        {!loading && <PaginationBar total={rows.length} page={page} onPageChange={setPage} pageSize={pageSize} />}
       </div>
     </div>
   );
@@ -5092,8 +5214,12 @@ function ErrorReportsViewer({ user }) {
   async function load() {
     setLoading(true);
     try {
-      const data = await fetchAllRows('error_reports', '*', 'created_at');
-      setRows((data || []).sort((a,b)=>String(b.created_at || '').localeCompare(String(a.created_at || ''))));
+      const { data } = await runNetworkRead(() => supabase
+        .from('error_reports')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(500));
+      setRows(data || []);
     } catch (e) {
       alert('오류보고 조회 오류: ' + e.message);
     } finally {
@@ -5278,8 +5404,12 @@ function AuditLogsViewer() {
   async function load() {
     setLoading(true);
     try {
-      const rows = await fetchAllRows('audit_logs', '*', 'created_at');
-      setLogs((rows || []).sort((a,b)=>String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 500));
+      const { data: rows } = await runNetworkRead(() => supabase
+        .from('audit_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(500));
+      setLogs(rows || []);
     } catch (e) {
       alert('감사로그 조회 오류: ' + e.message);
     } finally {
@@ -5378,12 +5508,24 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
 
   async function load() {
     try {
-      const allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
-      const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
+      let allTargets;
+      if (mode === 'store') {
+        const { data } = await runNetworkRead(() => supabase
+          .from('happycall_targets')
+          .select(HAPPY_CALL_TARGET_LIST_COLUMNS)
+          .eq('assigned_store', user.store_name)
+          .order('target_date', { ascending: true }));
+        allTargets = data || [];
+      } else {
+        allTargets = await fetchAllRows('happycall_targets', HAPPY_CALL_TARGET_LIST_COLUMNS, 'target_date');
+      }
 
       let visible = (allTargets || []).filter(isVisibleHappycallTarget);
       if (mode === 'store') visible = visible.filter(t => t.assigned_store === user.store_name);
 
+      const allLogs = mode === 'store'
+        ? await fetchRowsByValues('happycall_logs', 'target_id', visible.map(t => t.id), HAPPY_CALL_LOG_LIST_COLUMNS)
+        : await fetchAllRows('happycall_logs', HAPPY_CALL_LOG_LIST_COLUMNS, 'checked_at');
       setTargets(visible);
       setLogs(allLogs || []);
     } catch (e) {
@@ -5677,6 +5819,7 @@ function HappycallAssignmentStatus({ user }) {
   const [statusFilter, setStatusFilter] = useState('미완료전체');
   const [assignmentMode, setAssignmentMode] = useState('customers');
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => { load(); }, []);
 
@@ -5703,10 +5846,10 @@ function HappycallAssignmentStatus({ user }) {
   async function load() {
     try {
       const [empData, targetData, logData, customerData] = await Promise.all([
-        fetchAllRows('employees', '*', 'name'),
-        fetchAllRows('happycall_targets', '*', 'target_date'),
-        fetchAllRows('happycall_logs', '*', 'checked_at'),
-        fetchAllRows('customers', '*', 'open_date')
+        fetchAllRows('employees', 'id,name,store_name,status,role,happycall_enabled,happycall_assignment_enabled', 'name'),
+        fetchAllRows('happycall_targets', HAPPY_CALL_TARGET_LIST_COLUMNS, 'target_date'),
+        fetchAllRows('happycall_logs', HAPPY_CALL_LOG_LIST_COLUMNS, 'checked_at'),
+        fetchAllRows('customers', CUSTOMER_DISPLAY_COLUMNS, 'open_date')
       ]);
 
       const validTargets = (targetData || []).filter(isVisibleHappycallTarget);
@@ -5727,7 +5870,9 @@ function HappycallAssignmentStatus({ user }) {
       setTargets(validTargets);
       setLogs(logData || []);
       setCustomers(customerData || []);
-      setCustomersByJoinNo(Object.fromEntries(latestCustomerRecords.map(c => [c.join_no, c])));
+      const latestCustomers = makeLatestCustomerRecords(customerData || []);
+      setCustomersByJoinNo(Object.fromEntries(latestCustomers.map(c => [c.join_no, c])));
+      setPage(1);
       if ((!selectedEmployee || !visibleEmployees.some(e => e.name === selectedEmployee)) && visibleEmployees.length) setSelectedEmployee(visibleEmployees[0].name);
     } catch (e) {
       askErrorReport({ user, currentTab:'배정 현황', actionName:'배정 현황 조회', error:e });
@@ -5831,7 +5976,11 @@ function HappycallAssignmentStatus({ user }) {
 
   const visibleRows = assignmentMode === 'customers' ? selectedCustomerRecords : selectedHappycallTargets;
   const rowKey = row => assignmentMode === 'customers' ? String(row.join_no) : row.id;
-  const allSelected = visibleRows.length > 0 && visibleRows.every(row => selectedIds.includes(rowKey(row)));
+  const pageSize = 100;
+  const pageRows = visibleRows.slice((page - 1) * pageSize, page * pageSize);
+  const allSelected = pageRows.length > 0 && pageRows.every(row => selectedIds.includes(rowKey(row)));
+
+  useEffect(() => { setPage(1); }, [assignmentMode, selectedEmployee, statusFilter, keyword]);
 
   function changeMode(mode) {
     setAssignmentMode(mode);
@@ -5844,7 +5993,7 @@ function HappycallAssignmentStatus({ user }) {
   }
 
   function toggleAll(checked) {
-    const ids = visibleRows.map(rowKey);
+    const ids = pageRows.map(rowKey);
     setSelectedIds(prev => checked ? Array.from(new Set([...prev, ...ids])) : prev.filter(id => !ids.includes(id)));
   }
 
@@ -6004,7 +6153,7 @@ function HappycallAssignmentStatus({ user }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {selectedCustomerRecords.map(c => {
+                    {pageRows.map(c => {
                       const id = String(c.join_no);
                       return (
                         <tr key={id}>
@@ -6034,7 +6183,7 @@ function HappycallAssignmentStatus({ user }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {selectedHappycallTargets.map(t => {
+                    {pageRows.map(t => {
                       const latest = latestLogByTarget[t.id];
                       const c = customersByJoinNo[t.join_no] || {};
                       const state = latest?.review_status === '반려' ? '반려' : latest ? '완료' : '미완료';
@@ -6056,6 +6205,7 @@ function HappycallAssignmentStatus({ user }) {
               )}
             </table>
           </div>
+          <PaginationBar total={visibleRows.length} page={page} onPageChange={setPage} pageSize={pageSize} />
         </div>
       </div>
     </div>
@@ -6074,30 +6224,49 @@ function ReviewDashboard({ user }) {
   const [keyword, setKeyword] = useState('');
   const [selectedReviewIds, setSelectedReviewIds] = useState([]);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
     setLoading(true);
     try {
-      const allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
-      const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
-      const customers = await fetchAllRows('customers', '*', 'open_date');
-      setCustomersByJoinNo(Object.fromEntries((customers || []).map(c => [c.join_no, c])));
-
-      let visibleTargets = (allTargets || []).filter(isVisibleHappycallTarget);
+      let allowedStores = null;
       if (user.role === '검수자') {
-        const { data: permissions, error: permError } = await supabase
+        const { data: permissions } = await runNetworkRead(() => supabase
           .from('reviewer_store_permissions')
-          .select('*')
-          .eq('employee_id', user.id);
-        if (permError) throw permError;
-        const allowedStores = new Set((permissions || []).map(p => p.store_name));
-        visibleTargets = visibleTargets.filter(t => allowedStores.has(t.assigned_store));
+          .select('store_name')
+          .eq('employee_id', user.id));
+        allowedStores = (permissions || []).map(p => p.store_name).filter(Boolean);
       }
+
+      let allTargets = [];
+      if (allowedStores && !allowedStores.length) {
+        allTargets = [];
+      } else if (allowedStores) {
+        const { data } = await runNetworkRead(() => supabase
+          .from('happycall_targets')
+          .select(HAPPY_CALL_TARGET_LIST_COLUMNS)
+          .in('assigned_store', allowedStores)
+          .order('target_date', { ascending: true }));
+        allTargets = data || [];
+      } else {
+        allTargets = await fetchAllRows('happycall_targets', HAPPY_CALL_TARGET_LIST_COLUMNS, 'target_date');
+      }
+
+      const visibleTargets = (allTargets || []).filter(isVisibleHappycallTarget);
+      const targetIds = visibleTargets.map(t => t.id);
+      const allLogs = allowedStores
+        ? await fetchRowsByValues('happycall_logs', 'target_id', targetIds, HAPPY_CALL_LOG_LIST_COLUMNS)
+        : await fetchAllRows('happycall_logs', HAPPY_CALL_LOG_LIST_COLUMNS, 'checked_at');
+      const customers = allowedStores
+        ? await fetchRowsByValues('customers', 'join_no', visibleTargets.map(t => t.join_no), CUSTOMER_DISPLAY_COLUMNS, 250)
+        : await fetchAllRows('customers', CUSTOMER_DISPLAY_COLUMNS, 'open_date');
+      setCustomersByJoinNo(Object.fromEntries((customers || []).map(c => [c.join_no, c])));
 
       setTargets(visibleTargets);
       setLogs(allLogs || []);
+      setPage(1);
     } catch (e) {
       askErrorReport({ user, currentTab: '검수', actionName: '검수 목록 조회', error: e });
     } finally {
@@ -6142,6 +6311,10 @@ function ReviewDashboard({ user }) {
     rows.sort((a, b) => String(b.log.checked_at || '').localeCompare(String(a.log.checked_at || '')));
     return rows;
   }, [baseRows, filter, employeeFilter, storeFilter, keyword]);
+
+  useEffect(() => { setPage(1); }, [filter, employeeFilter, storeFilter, keyword]);
+  const pageSize = 100;
+  const pageReviewRows = reviewRows.slice((page - 1) * pageSize, page * pageSize);
 
   const stats = useMemo(() => {
     const total = baseRows.length;
@@ -6285,7 +6458,7 @@ function ReviewDashboard({ user }) {
             </tr>
           </thead>
           <tbody>
-            {reviewRows.map(({log, target}) => (
+            {pageReviewRows.map(({log, target}) => (
               <tr key={log.id} className="clickableRow" onClick={()=>setSelected({log, target, allLogs: logs})}>
                 <td className="checkCol" onClick={e=>e.stopPropagation()}>{(log.review_status || '검수대기') === '검수대기' ? <input type="checkbox" checked={selectedReviewIds.includes(log.id)} onChange={()=>toggleReviewSelection(log.id)} /> : '-'}</td>
                 <td>{formatCustomerJoinNo(target.join_no, customersByJoinNo, target.customer_name)} {hasMinorInfo(log) && <span className="minorBadge">미성년자</span>}</td>
@@ -6301,6 +6474,7 @@ function ReviewDashboard({ user }) {
             {!loading && !reviewRows.length && <tr><td colSpan="9"><EmptyStateText>조건에 맞는 검수 건이 없습니다.</EmptyStateText></td></tr>}
           </tbody>
         </table>
+        <PaginationBar total={reviewRows.length} page={page} onPageChange={setPage} pageSize={pageSize} />
       </div>
 
       {selected && <ReviewModal item={selected} user={user} onClose={()=>setSelected(null)} onSaved={load} />}
@@ -7133,15 +7307,20 @@ function TargetGenerator({ user }) {
     setPreview([]);
 
     try {
-      const [customers, employees, stores, histories, employeeHistories, refusedRows, happycallLogs] = await Promise.all([
-        fetchAllRows('customers', '*', 'open_date'),
-        fetchAllRows('employees', '*', 'name'),
-        fetchAllRows('stores', '*', 'name'),
-        fetchAllRows('assignment_history', '*', 'updated_at'),
-        fetchAllRows('employee_store_history', '*', 'start_date'),
-        fetchAllRows('refused_customers', '*', 'refused_at'),
-        fetchAllRows('happycall_logs', 'join_no,call_result,call_detail,checked_at,review_status', 'checked_at')
+      const [customers, employees, stores, histories, employeeHistories, refusedRows] = await Promise.all([
+        fetchAllRows('customers', CUSTOMER_DISPLAY_COLUMNS, 'open_date'),
+        fetchAllRows('employees', 'id,name,store_name,status,role,hire_date,resign_date,happycall_enabled,happycall_assignment_enabled', 'name'),
+        fetchAllRows('stores', 'id,name,status,successor_store', 'name'),
+        fetchAllRows('assignment_history', 'id,join_no,assigned_store,assigned_employee,assign_reason,updated_at', 'updated_at'),
+        fetchAllRows('employee_store_history', 'id,employee_id,employee_name,store_name,role,start_date,end_date', 'start_date'),
+        fetchAllRows('refused_customers', 'id,join_no,refused_at', 'refused_at')
       ]);
+      const happycallLogs = await fetchRowsByValues(
+        'happycall_logs',
+        'join_no',
+        (refusedRows || []).map(r => r.join_no),
+        'join_no,call_result,call_detail,checked_at,review_status'
+      );
 
       const activeEmployees = (employees || []).filter(e => isHappycallAssignableEmployee(e));
       const staffByStore = {};
@@ -7507,9 +7686,14 @@ function ManagerStoreDashboard({ user }) {
   useEffect(() => { load(); }, []);
   async function load() {
     try {
-      const allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
-      const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
-      setTargets((allTargets || []).filter(t => isVisibleHappycallTarget(t) && t.assigned_store === user.store_name));
+      const { data: allTargets } = await runNetworkRead(() => supabase
+        .from('happycall_targets')
+        .select(HAPPY_CALL_TARGET_LIST_COLUMNS)
+        .eq('assigned_store', user.store_name)
+        .order('target_date', { ascending: true }));
+      const visible = (allTargets || []).filter(t => isVisibleHappycallTarget(t) && t.assigned_store === user.store_name);
+      const allLogs = await fetchRowsByValues('happycall_logs', 'target_id', visible.map(t => t.id), HAPPY_CALL_LOG_LIST_COLUMNS);
+      setTargets(visible);
       setLogs(allLogs || []);
     } catch (e) {
       alert('매장 현황 조회 오류: ' + e.message);
@@ -7590,9 +7774,14 @@ function ManagerStoreDashboardV6({ user }) {
 
   async function load() {
     try {
-      const allTargets = await fetchAllRows('happycall_targets', '*', 'target_date');
-      const allLogs = await fetchAllRows('happycall_logs', '*', 'checked_at');
-      setTargets((allTargets || []).filter(t => isVisibleHappycallTarget(t) && t.assigned_store === user.store_name));
+      const { data: allTargets } = await runNetworkRead(() => supabase
+        .from('happycall_targets')
+        .select(HAPPY_CALL_TARGET_LIST_COLUMNS)
+        .eq('assigned_store', user.store_name)
+        .order('target_date', { ascending: true }));
+      const visible = (allTargets || []).filter(t => isVisibleHappycallTarget(t) && t.assigned_store === user.store_name);
+      const allLogs = await fetchRowsByValues('happycall_logs', 'target_id', visible.map(t => t.id), HAPPY_CALL_LOG_LIST_COLUMNS);
+      setTargets(visible);
       setLogs(allLogs || []);
     } catch (e) {
       alert('매장 현황 조회 오류: ' + e.message);

@@ -1,0 +1,8 @@
+# Local environment values must never be committed.
+.env
+.env.*
+!.env.example
+
+# Generated local files.
+node_modules/
+dist/
