@@ -6,12 +6,18 @@ import * as XLSX from 'xlsx';
 import './styles.css';
 import { createClientUuid, runNetworkMutation, runNetworkRead } from './networkMutation.js';
 import {
+  accrualHistoryRows,
+  findHolidayAccrualDraft,
+  holidayAccrualStep,
+  normalizeAccrualTypeValue
+} from './accrualFlow.js';
+import {
   isActiveEmployeeSession,
   resolveJichukRetiredSellerRule,
   sanitizeStoredEmployee
 } from './stage1Rules.js';
 
-const APP_BUILD_VERSION = 'V29.53';
+const APP_BUILD_VERSION = 'V29.54';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -1495,18 +1501,33 @@ function AccrualRequestTab({ user }) {
   const [startPhoto,setStartPhoto]=useState(null);
   const [endPhoto,setEndPhoto]=useState(null);
   const [endHours,setEndHours]=useState(1);
+  const [holidayReason,setHolidayReason]=useState('');
   const [selected,setSelected]=useState(null);
   const [busy,setBusy]=useState(false);
   const [loading,setLoading]=useState(true);
   const [noticeOpen,setNoticeOpen]=useState(false);
 
-  useEffect(()=>{ load(); },[]);
-
   function normalizeAccrualType(v){
-    if (v === '야근 적립') return '고객 추가 응대';
-    if (v === '휴무출근 적립' || v === '휴무 출근 적립') return '휴무 고객응대';
-    return v || '';
+    return normalizeAccrualTypeValue(v);
   }
+
+  const holidayDraft = useMemo(() => findHolidayAccrualDraft(rows), [rows]);
+  const historyRows = useMemo(() => accrualHistoryRows(rows), [rows]);
+  const holidayDraftPhotos = useMemo(() =>
+    parseEvidencePhotos(holidayDraft?.evidence_photo_data),
+    [holidayDraft?.evidence_photo_data]
+  );
+  const savedHolidayEndPhoto = useMemo(() => holidayDraftPhotos.find(p =>
+    p?.type === '응대 종료' || p?.type === '퇴근'
+  ) || null, [holidayDraftPhotos]);
+  const holidayStep = holidayAccrualStep(holidayDraft, holidayDraftPhotos);
+
+  useEffect(()=>{ load(); },[]);
+  useEffect(()=>{
+    if(!holidayDraft) return;
+    setMode('휴무 고객응대');
+    if(holidayDraft.reason) setHolidayReason(holidayDraft.reason);
+  },[holidayDraft?.id]);
 
   async function load(){
     setLoading(true);
@@ -1584,50 +1605,68 @@ function AccrualRequestTab({ user }) {
 
   async function saveStartDraft(){
     if(!startPhoto) return alert('응대 시작 사진을 촬영해주세요.');
-    if(!reason.trim()) return alert('고객 응대 내용을 입력해주세요.');
     const requestDate = dateFromCapturedAt(startPhoto);
     setBusy(true);
     try{
       const {error}=await supabase.from('freepass_requests').insert({
         employee_id:user.id, employee_name:user.name, employee_store:user.store_name,
-        request_type:'휴무 고객응대', use_type:null, request_date:requestDate, hours:0, reason,
+        request_type:'휴무 고객응대', use_type:null, request_date:requestDate, hours:0, reason:'',
         evidence_photo_data:buildEvidencePhotos({startPhoto}),
         status:'임시저장', manager_status:'점장승인생략', final_status:'대기',
         requested_at:new Date().toISOString(), manager_approved_by:user.name, manager_approved_at:new Date().toISOString()
       });
       if(error) throw error;
-      await writeAuditLog('휴무고객응대시작사진임시저장','freepass_requests',user.name,user,`${requestDate} / ${reason}`);
-      alert('응대 시작 사진이 임시저장되었습니다. 종료 시 신청현황에서 해당 건을 눌러 종료 사진과 적립 시간을 입력해주세요.');
-      setStartPhoto(null); setReason(''); load();
+      await writeAuditLog('휴무고객응대시작사진임시저장','freepass_requests',user.name,user,`${requestDate} / 시작 사진 저장`);
+      alert('시작 사진이 저장되었습니다. 응대가 끝나면 같은 화면에서 종료 사진을 촬영해주세요.');
+      setStartPhoto(null); load();
     }catch(e){ askErrorReport({user,currentTab:'프리패스 적립 요청',actionName:'휴무 고객응대 시작 사진 임시저장',error:e}); }
     finally{ setBusy(false); }
   }
 
-  async function submitHolidayFinal(row){
+  async function saveEndDraft(){
+    if(!holidayDraft) return alert('저장된 시작 사진을 찾을 수 없습니다.');
     if(!endPhoto) return alert('응대 종료 사진을 촬영해주세요.');
+    setBusy(true);
+    try{
+      const existing = parseEvidencePhotos(holidayDraft.evidence_photo_data);
+      const photos = [...existing.filter(p => p.type !== '응대 종료' && p.type !== '퇴근'), endPhoto];
+      const {error}=await supabase.from('freepass_requests').update({
+        evidence_photo_data:JSON.stringify(photos)
+      }).eq('id', holidayDraft.id).eq('status', '임시저장');
+      if(error) throw error;
+      await writeAuditLog('휴무고객응대종료사진임시저장','freepass_requests',holidayDraft.id,user,`${freepassPhotoTimeLabel(endPhoto.captured_at)} / 종료 사진 저장`);
+      alert('종료 사진이 저장되었습니다. 사유와 적립 시간을 입력해 최종 신청해주세요.');
+      setEndPhoto(null); load();
+    }catch(e){ askErrorReport({user,currentTab:'프리패스 적립 요청',actionName:'휴무 고객응대 종료 사진 임시저장',error:e}); }
+    finally{ setBusy(false); }
+  }
+
+  async function submitHolidayFinal(row){
+    const existing = parseEvidencePhotos(row?.evidence_photo_data);
+    const savedEndPhoto = existing.find(p => p?.type === '응대 종료' || p?.type === '퇴근');
+    if(!savedEndPhoto) return alert('저장된 응대 종료 사진을 찾을 수 없습니다.');
+    if(!holidayReason.trim()) return alert('고객 응대 내용을 입력해주세요.');
     if(!endHours || Number(endHours) <= 0) return alert('적립 시간을 선택해주세요.');
     const consent = confirmConsent('휴무 고객응대');
     if(!consent) return;
-    const requestDate = dateFromCapturedAt(endPhoto, row.request_date);
+    const requestDate = dateFromCapturedAt(savedEndPhoto, row.request_date);
     setBusy(true);
     try{
-      const existing = parseEvidencePhotos(row.evidence_photo_data);
-      const photos = [...existing.filter(p => p.type !== '응대 종료' && p.type !== '퇴근'), endPhoto];
       const {error}=await supabase.from('freepass_requests').update({
-        evidence_photo_data:JSON.stringify(photos),
         status:'최종승인대기',
         final_status:'대기',
         request_date:requestDate,
         hours:Number(endHours),
+        reason:holidayReason.trim(),
         consent_agreed:true,
         consent_agreed_at:consent.agreed_at,
         consent_text:consent.consent_text,
         consent_snapshot:consent
       }).eq('id', row.id);
       if(error) throw error;
-      await writeAuditLog('휴무고객응대최종신청','freepass_requests',row.id,user,`${requestDate} / ${endHours}시간 / 동의완료`);
+      await writeAuditLog('휴무고객응대최종신청','freepass_requests',row.id,user,`${requestDate} / ${endHours}시간 / ${holidayReason.trim()} / 동의완료`);
       alert('휴무 고객응대 적립 요청이 접수되었습니다.');
-      setEndPhoto(null); setEndHours(1); setSelected(null); load();
+      setEndPhoto(null); setEndHours(1); setHolidayReason(''); setSelected(null); load();
     }catch(e){ askErrorReport({user,currentTab:'프리패스 적립 요청',actionName:'휴무 고객응대 최종 저장',error:e}); }
     finally{ setBusy(false); }
   }
@@ -1668,26 +1707,56 @@ function AccrualRequestTab({ user }) {
         </>}
 
         {mode==='휴무 고객응대' && <>
-          <div className="accrualProgressSteps"><span className="active">1 시작 사진</span><span>2 종료 사진</span><span>3 최종 신청</span></div>
-          <div className="accrualStepTitle"><span>1</span><div><b>응대 시작 기록</b><small>내용 작성 후 시작 사진을 촬영해 임시저장하세요.</small></div></div>
-          <label className="accrualReasonField"><span>고객 응대 내용</span><textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="예) 휴무일 기존 고객 상담 또는 긴급 개통 지원" /></label>
-          <div className={`photoCaptureBox accrualPhotoStep ${startPhoto?'complete':''}`}>
-            <div className="accrualPhotoStatus"><b>{startPhoto?'시작 사진 촬영 완료':'시작 사진이 필요합니다'}</b><span>{startPhoto?'임시저장하면 신청현황에서 종료할 수 있습니다.':'응대를 시작할 때 현장에서 촬영하세요.'}</span></div>
-            <label className="cameraButton">{startPhoto?'시작 사진 다시 촬영':'시작 사진 촬영'}<input type="file" accept="image/*" capture="environment" onChange={e=>capturePhoto(e.target.files?.[0], setStartPhoto, '응대 시작')} /></label>
-            {startPhoto && <div className="evidenceItem"><img className="evidencePreview" src={startPhoto.data} alt="응대 시작 사진" /><p>촬영일시: {freepassPhotoTimeLabel(startPhoto.captured_at)}</p><button type="button" onClick={()=>setStartPhoto(null)}>삭제/재촬영</button></div>}
-            <button className="primary accrualSubmitButton" disabled={busy || !startPhoto} onClick={saveStartDraft}>{startPhoto ? '시작 기록 임시저장' : '사진 촬영 후 저장 가능'}</button>
+          <div className="accrualProgressSteps holidayProgressSteps" aria-label={`휴무 고객응대 ${holidayStep}단계`}>
+            <span className={holidayStep===1?'active':holidayStep>1?'complete':''}>1 시작 사진</span>
+            <span className={holidayStep===2?'active':holidayStep>2?'complete':''}>2 종료 사진</span>
+            <span className={holidayStep===3?'active':''}>3 최종 신청</span>
           </div>
+
+          {holidayStep===1 && <div className="holidayStepPanel">
+            <div className="accrualStepTitle"><span>1</span><div><b>시작 사진 촬영</b><small>응대를 시작할 때 현장에서 사진을 촬영해 저장하세요.</small></div></div>
+            <div className={`photoCaptureBox accrualPhotoStep ${startPhoto?'complete':''}`}>
+              <div className="accrualPhotoStatus"><b>{startPhoto?'시작 사진 촬영 완료':'시작 사진이 필요합니다'}</b><span>{startPhoto?'사진을 확인한 뒤 저장하세요.':'응대를 시작할 때 현장에서 촬영하세요.'}</span></div>
+              <label className="cameraButton">{startPhoto?'시작 사진 다시 촬영':'시작 사진 촬영'}<input type="file" accept="image/*" capture="environment" onChange={e=>capturePhoto(e.target.files?.[0], setStartPhoto, '응대 시작')} /></label>
+              {startPhoto && <div className="evidenceItem"><img className="evidencePreview" src={startPhoto.data} alt="응대 시작 사진" /><p>촬영일시: {freepassPhotoTimeLabel(startPhoto.captured_at)}</p><button type="button" onClick={()=>setStartPhoto(null)}>삭제/재촬영</button></div>}
+              <button className="primary accrualSubmitButton" disabled={busy || !startPhoto} onClick={saveStartDraft}>{startPhoto ? '시작 사진 저장' : '사진 촬영 후 저장 가능'}</button>
+            </div>
+          </div>}
+
+          {holidayStep===2 && <div className="holidayStepPanel">
+            <div className="accrualStepTitle"><span>2</span><div><b>종료 사진 촬영</b><small>응대가 끝난 현장에서 종료 사진을 촬영해 저장하세요.</small></div></div>
+            <div className="holidaySavedSummary"><span>시작 사진 저장 완료</span><small>{freepassPhotoTimeLabel(holidayDraftPhotos.find(p=>p?.type==='응대 시작')?.captured_at)}</small></div>
+            <div className={`photoCaptureBox accrualPhotoStep ${endPhoto?'complete':''}`}>
+              <div className="accrualPhotoStatus"><b>{endPhoto?'종료 사진 촬영 완료':'종료 사진이 필요합니다'}</b><span>{endPhoto?'사진을 확인한 뒤 저장하세요.':'응대가 끝났을 때 현장에서 촬영하세요.'}</span></div>
+              <label className="cameraButton">{endPhoto?'종료 사진 다시 촬영':'종료 사진 촬영'}<input type="file" accept="image/*" capture="environment" onChange={e=>capturePhoto(e.target.files?.[0], setEndPhoto, '응대 종료')} /></label>
+              {endPhoto && <div className="evidenceItem"><img className="evidencePreview" src={endPhoto.data} alt="응대 종료 사진" /><p>촬영일시: {freepassPhotoTimeLabel(endPhoto.captured_at)}</p><button type="button" onClick={()=>setEndPhoto(null)}>삭제/재촬영</button></div>}
+              <button className="primary accrualSubmitButton" disabled={busy || !endPhoto} onClick={saveEndDraft}>{endPhoto ? '종료 사진 저장' : '사진 촬영 후 저장 가능'}</button>
+            </div>
+          </div>}
+
+          {holidayStep===3 && <div className="holidayStepPanel holidayFinalStep">
+            <div className="accrualStepTitle"><span>3</span><div><b>최종 신청</b><small>응대 내용과 적립 시간을 입력한 뒤 최종 신청하세요.</small></div></div>
+            <div className="holidaySavedPhotos">
+              <div className="holidaySavedSummary"><span>시작 사진 저장 완료</span><small>{freepassPhotoTimeLabel(holidayDraftPhotos.find(p=>p?.type==='응대 시작')?.captured_at)}</small></div>
+              <div className="holidaySavedSummary"><span>종료 사진 저장 완료</span><small>{freepassPhotoTimeLabel(savedHolidayEndPhoto?.captured_at)}</small></div>
+            </div>
+            <label className="accrualReasonField"><span>고객 응대 내용</span><textarea value={holidayReason} onChange={e=>setHolidayReason(e.target.value)} placeholder="예) 휴무일 기존 고객 상담 또는 긴급 개통 지원" /></label>
+            <div className="formGrid compactFormGrid holidayFinalFields">
+              <label>복지 적립 시간<select value={endHours} onChange={e=>setEndHours(Number(e.target.value))}><option value={1}>1시간</option><option value={2}>2시간</option><option value={3}>3시간</option></select></label>
+            </div>
+            <button className="primary accrualSubmitButton" disabled={busy || !holidayReason.trim()} onClick={()=>submitHolidayFinal(holidayDraft)}>동의 후 최종 신청</button>
+          </div>}
         </>}
       </div>
 
       <div className="sectionCard accrualHistoryCard">
         <div className="accrualSectionHead"><div><span className="accrualEyebrow">나의 신청</span><h3>적립 요청 신청현황</h3></div></div>
-        <p className="accrualHistoryHelp">휴무 고객응대의 <b>종료 사진 등록 필요</b> 카드를 누르면 최종 신청을 이어갈 수 있습니다.</p>
+        <p className="accrualHistoryHelp">최종 신청을 완료한 적립 요청 이력을 확인할 수 있습니다.</p>
         {loading && <div className="inlineLoadingState"><span className="loadingDot"></span>로딩 중</div>}
-        {!loading && rows.length > 0 && <table className="accrualDesktopTable">
+        {!loading && historyRows.length > 0 && <table className="accrualDesktopTable">
           <thead><tr><th>접수 날짜·시각</th><th>유형</th><th>응대 발생일</th><th>시간</th><th>내용</th><th>동의</th><th>상태</th></tr></thead>
           <tbody>
-            {rows.map(r=><tr key={r.id} className="clickableRow" onClick={()=>setSelected(r)}>
+            {historyRows.map(r=><tr key={r.id} className="clickableRow" onClick={()=>setSelected(r)}>
               <td>{formatKST(r.requested_at || r.created_at)}</td>
               <td>{normalizeAccrualType(r.request_type)}</td>
               <td>{r.request_date || '-'}</td>
@@ -1698,18 +1767,17 @@ function AccrualRequestTab({ user }) {
             </tr>)}
           </tbody>
         </table>}
-        {!loading && rows.length > 0 && <div className="accrualMobileList">
-          {rows.map(r=>{
-            const draft = normalizeAccrualType(r.request_type)==='휴무 고객응대' && r.status==='임시저장';
-            return <button type="button" key={r.id} className={`accrualHistoryItem ${draft?'needsAction':''}`} onClick={()=>setSelected(r)}>
-              <div className="accrualHistoryTop"><strong>{normalizeAccrualType(r.request_type)}</strong><span className={`requestStatusBadge ${pushStatusClass(r.status)}`}>{draft?'종료 사진 등록 필요':pushStatusLabel(r.status)}</span></div>
+        {!loading && historyRows.length > 0 && <div className="accrualMobileList">
+          {historyRows.map(r=>{
+            return <button type="button" key={r.id} className="accrualHistoryItem" onClick={()=>setSelected(r)}>
+              <div className="accrualHistoryTop"><strong>{normalizeAccrualType(r.request_type)}</strong><span className={`requestStatusBadge ${pushStatusClass(r.status)}`}>{pushStatusLabel(r.status)}</span></div>
               <div className="accrualHistoryMeta"><span>{r.request_date || '-'}</span><span>{Number(r.hours||0) ? `${r.hours}시간` : '시간 미정'}</span></div>
               <p>{r.reason || '응대 내용 없음'}</p>
               <small>접수 {formatKST(r.requested_at || r.created_at)}</small>
             </button>;
           })}
         </div>}
-        {!loading && !rows.length && <div className="accrualEmptyState">적립 요청 내역이 없습니다.</div>}
+        {!loading && !historyRows.length && <div className="accrualEmptyState">완료된 적립 요청 내역이 없습니다.</div>}
       </div>
 
       {selected && <div className="modalBg"><div className="modal accrualDetailModal">
@@ -1727,16 +1795,6 @@ function AccrualRequestTab({ user }) {
         <div className="evidenceGrid">
           {parseEvidencePhotos(selected.evidence_photo_data).map((p,idx)=><div className="evidenceItem" key={idx}><b>{p.type || `사진 ${idx+1}`}</b><img className="evidencePreview" src={p.data || p} alt={p.type || `증빙 ${idx+1}`} />{p.captured_at && <p>촬영일시: {freepassPhotoTimeLabel(p.captured_at)}</p>}</div>)}
         </div>
-        {normalizeAccrualType(selected.request_type)==='휴무 고객응대' && selected.status === '임시저장' && <div className="photoCaptureBox">
-          <div className="formGrid compactFormGrid">
-            <label>적립 시간<select value={endHours} onChange={e=>setEndHours(Number(e.target.value))}><option value={1}>1시간</option><option value={2}>2시간</option><option value={3}>3시간</option></select></label>
-          </div>
-          <div className="buttonRow">
-            <label className="cameraButton">응대 종료 사진 촬영<input type="file" accept="image/*" capture="environment" onChange={e=>capturePhoto(e.target.files?.[0], setEndPhoto, '응대 종료')} /></label>
-            <button className="primary" disabled={busy || !endPhoto} onClick={()=>submitHolidayFinal(selected)}>{endPhoto ? '동의 후 최종 요청' : '응대 종료 사진 촬영 후 활성화'}</button>
-          </div>
-          {endPhoto && <div className="evidenceItem"><img className="evidencePreview" src={endPhoto.data} alt="응대 종료 사진" /><p>촬영일시: {freepassPhotoTimeLabel(endPhoto.captured_at)}</p><button type="button" onClick={()=>setEndPhoto(null)}>삭제/재촬영</button></div>}
-        </div>}
       </div></div>}
     </div>
   );
