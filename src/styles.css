@@ -10312,3 +10312,95 @@ td > .inlineLoadingState,
     grid-template-columns:1fr !important;
   }
 }
+
+/* =========================================================
+   V29.54 적립 요청: 응대 발생일 정렬·휴무 고객응대 3단계 연속 흐름
+   ========================================================= */
+.accrualRequestCard .accrualCompactFields{
+  align-items:end !important;
+  overflow:visible !important;
+  padding:10px 12px !important;
+}
+.accrualRequestCard .accrualCompactFields label{
+  display:flex !important;
+  flex-direction:column !important;
+  gap:7px !important;
+  margin:0 !important;
+  color:#0f172a !important;
+  font-size:13px !important;
+  font-weight:900 !important;
+}
+.accrualRequestCard .accrualCompactFields input,
+.accrualRequestCard .accrualCompactFields select{
+  width:100% !important;
+  height:48px !important;
+  min-height:48px !important;
+  margin:0 !important;
+  padding:0 12px !important;
+  border-radius:12px !important;
+  font-size:15px !important;
+  font-weight:800 !important;
+  line-height:48px !important;
+}
+.holidayProgressSteps span.complete{
+  background:#e2e8f0;
+  color:#64748b;
+}
+.holidayStepPanel{
+  min-width:0;
+}
+.holidaySavedPhotos{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin-bottom:14px;
+}
+.holidaySavedSummary{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  min-width:0;
+  margin-bottom:12px;
+  padding:10px 12px;
+  border:1px solid #bbf7d0;
+  border-radius:12px;
+  background:#f0fdf4;
+}
+.holidaySavedPhotos .holidaySavedSummary{
+  margin-bottom:0;
+}
+.holidaySavedSummary span{
+  color:#166534;
+  font-size:13px;
+  font-weight:900;
+  white-space:nowrap;
+}
+.holidaySavedSummary small{
+  min-width:0;
+  overflow:hidden;
+  color:#64748b;
+  font-size:11px;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.holidayFinalFields{
+  grid-template-columns:minmax(180px,280px) !important;
+  margin-bottom:12px !important;
+}
+.holidayFinalStep > .accrualSubmitButton{
+  width:100% !important;
+  min-height:48px !important;
+}
+
+@media(max-width:768px){
+  .accrualRequestCard .accrualCompactFields{
+    padding:10px !important;
+  }
+  .holidaySavedPhotos{
+    grid-template-columns:1fr;
+  }
+  .holidayFinalFields{
+    grid-template-columns:1fr !important;
+  }
+}
