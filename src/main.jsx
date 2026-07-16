@@ -11,7 +11,7 @@ import {
   sanitizeStoredEmployee
 } from './stage1Rules.js';
 
-const APP_BUILD_VERSION = 'V29.51';
+const APP_BUILD_VERSION = 'V29.52';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -3107,6 +3107,7 @@ function MobileSideDrawer({ open, onClose, user, setTab, onLogout, onPassword })
           {isManager && <button onClick={()=>go('storecalls')}>매장 리스트</button>}
           {(isAdmin || isChecker) && <button onClick={()=>go('review')}>검수</button>}
           {(isAdmin || isChecker) && <button onClick={()=>go('allcalls')}>전체 해피콜</button>}
+          {isAdmin && <button onClick={()=>go('assignmentStatus')}>배정 현황</button>}
           {(isAdmin || isChecker) && <button onClick={()=>go('performance')}>전체 직원 현황</button>}
           {isAdmin && <button onClick={()=>go('refused')}>통화 불가 고객</button>}
           {isAdmin && <button onClick={()=>go('rawupload')}>RAW 업로드</button>}
@@ -3318,8 +3319,9 @@ function PaginationBar({ total, page, onPageChange, pageSize = 100 }) {
 }
 
 function MobileInfoCard({ title, subtitle, meta = [], status, badgeClass = '', onClick, children }) {
+  const CardTag = onClick ? 'button' : 'div';
   return (
-    <button type="button" className="mobileInfoCard" onClick={onClick}>
+    <CardTag {...(onClick ? { type: 'button', onClick } : {})} className={`mobileInfoCard ${onClick ? 'interactive' : 'static'}`}>
       <div className="mobileInfoCardMain">
         <div>
           <strong>{title}</strong>
@@ -3329,7 +3331,7 @@ function MobileInfoCard({ title, subtitle, meta = [], status, badgeClass = '', o
         {status && <em className={`requestStatusBadge ${badgeClass}`}>{status}</em>}
       </div>
       {children && <div className="mobileInfoCardExtra">{children}</div>}
-    </button>
+    </CardTag>
   );
 }
 
@@ -4974,7 +4976,7 @@ function RefusedCustomersViewer() {
   const pageRows = rows.slice((page - 1) * pageSize, page * pageSize);
 
   return (
-    <div>
+    <div className="refusedCustomersPage">
       <h2>통화 불가 고객</h2>
       <div className="sectionCard desktopAuditTableCard">
         <table className="auditLogsTable">
@@ -5001,6 +5003,25 @@ function RefusedCustomersViewer() {
             {!loading && !rows.length && <tr><td colSpan="5" className="muted">통화 불가 고객이 없습니다.</td></tr>}
           </tbody>
         </table>
+        {!loading && <PaginationBar total={rows.length} page={page} onPageChange={setPage} pageSize={pageSize} />}
+      </div>
+
+      <div className="mobileCardList refusedMobileList">
+        {loading && <div className="sectionCard pageLoadingPanel"><InlineLoadingState /></div>}
+        {!loading && pageRows.map(r => (
+          <MobileInfoCard
+            key={r.id || r.join_no}
+            title={formatCustomerJoinNo(r.join_no, customersByJoinNo, r.customer_name)}
+            subtitle={`${formatKST(r.refused_at)} · ${r.refused_by || '처리자 없음'}`}
+            meta={[
+              r.memo || '메모 없음',
+              r.latestLog ? `${r.latestLog.call_result} · ${r.latestLog.call_detail}` : '최신 처리결과 없음'
+            ]}
+            status={r.latestLog?.call_detail || '통화 불가'}
+            badgeClass="rejected"
+          />
+        ))}
+        {!loading && !rows.length && <EmptyStateText>통화 불가 고객이 없습니다.</EmptyStateText>}
         {!loading && <PaginationBar total={rows.length} page={page} onPageChange={setPage} pageSize={pageSize} />}
       </div>
     </div>
@@ -5444,7 +5465,7 @@ function AuditLogsViewer() {
         <input placeholder="작업내용 검색" value={keyword} onChange={e=>setKeyword(e.target.value)} />
         <button onClick={() => { setActorFilter('전체'); setActionFilter('전체'); setKeyword(''); }}>필터 초기화</button>
       </div>
-      <div className="sectionCard">
+      <div className="sectionCard desktopAuditTableCard">
         <table>
           <thead>
             <tr><th>일시(KST)</th><th>작업자</th><th>작업</th><th>상세</th></tr>
@@ -5503,10 +5524,12 @@ function AuditLogsViewer() {
 function EmployeePerformanceDashboard({ user, mode = 'all' }) {
   const [targets, setTargets] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { load(); }, [mode]);
 
   async function load() {
+    setLoading(true);
     try {
       let allTargets;
       if (mode === 'store') {
@@ -5530,6 +5553,8 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
       setLogs(allLogs || []);
     } catch (e) {
       alert('직원별 현황 조회 오류: ' + e.message);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -5771,9 +5796,12 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
   }
 
   return (
-    <div>
+    <div className="employeePerformancePage">
       <h2>{mode === 'store' ? `${user.store_name} 직원별 해피콜 현황` : '직원별 해피콜 현황'}</h2>
       <button className="primary copyStatusBtn" onClick={copyIncompleteRows}>미완료자 이미지 복사</button>
+      {loading ? (
+        <div className="sectionCard pageLoadingPanel"><InlineLoadingState /></div>
+      ) : (<>
       <div className="stats">
         <Card title="전체 대상" value={total.total} />
         <Card title="전체 완료율" value={`${total.total ? Math.round(total.done / total.total * 1000) / 10 : 0}%`} />
@@ -5781,7 +5809,7 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
         <Card title="반려" value={total.rejected} />
       </div>
 
-      <div className="sectionCard">
+      <div className="sectionCard desktopEmployeePerformanceTable">
         <table>
           <thead>
             <tr>
@@ -5801,6 +5829,27 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
           </tbody>
         </table>
       </div>
+
+      <div className="mobileCardList employeePerformanceMobileList">
+        {rows.map(r => {
+          const rate = r.total ? Math.round(r.done / r.total * 1000) / 10 : 0;
+          return (
+            <MobileInfoCard
+              key={r.name}
+              title={r.name}
+              subtitle={`${r.store || '-'} · 전체 ${r.total}건 · 완료 ${r.done}건`}
+              meta={[
+                `미완료 ${r.pending}건 · 경과 ${r.overdue}건`,
+                `오늘 ${r.todayDone}/${r.todayTotal}건 · 검수대기 ${r.reviewPending}건`
+              ]}
+              status={`${rate}%`}
+              badgeClass={rate >= 100 ? 'approved' : rate >= 90 ? 'waiting' : 'rejected'}
+            />
+          );
+        })}
+        {!rows.length && <EmptyStateText>표시할 현황이 없습니다.</EmptyStateText>}
+      </div>
+      </>)}
     </div>
   );
 }
