@@ -2356,7 +2356,7 @@ function FreepassAdminAdjust({ user }) {
           </div>
         </div>
         <textarea value={bulkReason} onChange={e=>setBulkReason(e.target.value)} placeholder="일괄 처리 사유 입력" />
-        <table className="freepassBulkTable compactFreepassTable">
+        <table className="freepassBulkTable compactFreepassTable desktopFreepassBulkTable">
           <thead><tr><th>선택</th><th>매장</th><th>직원</th><th>권한</th>{bulkIndividual && <><th>구분</th><th>시간</th></>}</tr></thead>
           <tbody>
             {loading && <tr className="approvalEmptyRow"><td colSpan={bulkIndividual ? 6 : 4}><InlineLoadingState /></td></tr>}
@@ -2374,6 +2374,25 @@ function FreepassAdminAdjust({ user }) {
             })}
           </tbody>
         </table>
+        <div className="mobileCardList freepassBulkMobileList">
+          {loading && <InlineLoadingState />}
+          {!loading && employees.map(emp=>{
+            const key=emp.id||emp.name; const row=bulkRows[key]||{};
+            return (
+              <div className="mobileInfoCard static freepassBulkMobileCard" key={key}>
+                <div className="mobileInfoCardMain">
+                  <div><strong>{emp.name}</strong><p>{emp.store_name} · {emp.role || '직원'}</p></div>
+                  <input type="checkbox" checked={!!row.checked} onChange={e=>updateBulkRow(key,{checked:e.target.checked})}/>
+                </div>
+                {bulkIndividual && <div className="mobileInfoCardExtra freepassBulkMobileFields">
+                  <label>구분<select value={row.type||bulkType} onChange={e=>updateBulkRow(key,{type:e.target.value})}><option>적립</option><option>차감</option><option>사용처리</option></select></label>
+                  <label>시간<input type="number" min="0" step="1" value={row.hours??''} placeholder={String(bulkHours)} onChange={e=>updateBulkRow(key,{hours:e.target.value})}/></label>
+                </div>}
+              </div>
+            );
+          })}
+          {!loading && !employees.length && <EmptyStateText>표시할 직원이 없습니다.</EmptyStateText>}
+        </div>
         <button className="primary" disabled={busy} onClick={saveBulk}>일괄 처리 저장</button>
       </div>
     </div>
@@ -2586,7 +2605,7 @@ function FreepassSemiannualReset({ user }) {
       <h3>6개월 잔여 프리패스 초기화</h3>
       <p className="muted">잔여 프리패스만 0으로 초기화하고, 마이너스 잔여시간은 유지합니다. 예외 체크한 인원은 초기화하지 않습니다.</p>
       <button className="dangerBtn" disabled={busy} onClick={runReset}>잔여 프리패스 초기화 실행</button>
-      <table className="freepassResetTable compactFreepassTable">
+      <table className="freepassResetTable compactFreepassTable desktopFreepassResetTable">
         <thead><tr><th>예외</th><th>매장</th><th>직원</th><th>현재 잔여</th><th>초기화 차감</th></tr></thead>
         <tbody>
           {loading && <tr className="approvalEmptyRow"><td colSpan="5"><InlineLoadingState /></td></tr>}
@@ -2606,6 +2625,23 @@ function FreepassSemiannualReset({ user }) {
           {!loading && !resetTargets.length && <tr className="approvalEmptyRow"><td colSpan="5"><div className="freepassStateBox">초기화 대상 잔여 프리패스가 없습니다.</div></td></tr>}
         </tbody>
       </table>
+      <div className="mobileCardList freepassResetMobileList">
+        {loading && <InlineLoadingState />}
+        {!loading && resetTargets.map(emp=>{
+          const key=emp.id||emp.name;
+          const except=!!exceptions[key];
+          return (
+            <label className="mobileInfoCard static freepassResetMobileCard" key={key}>
+              <div className="mobileInfoCardMain">
+                <div><strong>{emp.name}</strong><p>{emp.store_name} · 현재 잔여 {emp.balance}시간</p></div>
+                <input type="checkbox" checked={except} onChange={e=>toggleException(key,e.target.checked)} />
+              </div>
+              <div className="mobileInfoCardExtra">{except ? '초기화 예외' : `초기화 시 -${emp.balance}시간`}</div>
+            </label>
+          );
+        })}
+        {!loading && !resetTargets.length && <EmptyStateText>초기화 대상 잔여 프리패스가 없습니다.</EmptyStateText>}
+      </div>
     </div>
   );
 }
@@ -2989,6 +3025,9 @@ function statusOptionsFor(row){
   return (
     <div className="accessoryModule">
       <h2>악세사리 주문 관리</h2>
+      {loading ? (
+        <div className="sectionCard pageLoadingPanel"><InlineLoadingState /></div>
+      ) : (<>
       <div className="accessorySummaryGrid accessorySummaryCompact">
         <div className="accessoryStat"><span>주문 원가</span><strong>{formatKRW(filteredAmount)}</strong></div>
         <div className="accessoryStat"><span>수납 예정</span><strong>{formatKRW(filteredPayment)}</strong></div>
@@ -3050,6 +3089,7 @@ function statusOptionsFor(row){
           {!filtered.length && <p className="emptyAccessory">표시할 주문건이 없습니다.</p>}
         </div>
       </div>
+      </>)}
 
       {statusModal && <div className="modalBg">
         <div className="modal accessoryStatusModal">
@@ -4045,19 +4085,30 @@ function BulkTempAssignModal({ user, targets, latestLogByTarget, onClose, onSave
 
 function CallHistoryList({ targetId }) {
   const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { load(); }, [targetId]);
 
   async function load() {
-    const { data, error } = await supabase
-      .from('happycall_logs')
-      .select('*')
-      .eq('target_id', targetId)
-      .order('checked_at', { ascending: true })
-      .order('id', { ascending: true });
-    if (!error) setLogs(data || []);
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('happycall_logs')
+        .select('*')
+        .eq('target_id', targetId)
+        .order('checked_at', { ascending: true })
+        .order('id', { ascending: true });
+      if (error) throw error;
+      setLogs(data || []);
+    } catch (error) {
+      console.warn('happycall history load failed', error);
+      setLogs([]);
+    } finally {
+      setLoading(false);
+    }
   }
 
+  if (loading) return <InlineLoadingState />;
   if (!logs.length) return <p className="muted">처리 이력이 없습니다.</p>;
 
   return (
@@ -4941,18 +4992,26 @@ function WorkHistoryInner({ employee, stores, user }) {
   const [draftRows, setDraftRows] = useState([blankRow()]);
   const [busy, setBusy] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { load(); }, [employee.id]);
 
   async function load() {
-    const { data, error } = await supabase
-      .from('employee_store_history')
-      .select('*')
-      .eq('employee_id', employee.id)
-      .order('start_date', { ascending: false });
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('employee_store_history')
+        .select('*')
+        .eq('employee_id', employee.id)
+        .order('start_date', { ascending: false });
 
-    if (error) alert('근무이력 조회 오류: ' + error.message);
-    setRows(data || []);
+      if (error) throw error;
+      setRows(data || []);
+    } catch (error) {
+      alert('근무이력 조회 오류: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   function addDraftRow() { setDraftRows(prev => [...prev, blankRow()]); }
@@ -5044,7 +5103,8 @@ function WorkHistoryInner({ employee, stores, user }) {
         <table className="historyTable rehireHistoryTable">
           <thead><tr><th>매장</th><th>직책</th><th>재입사/시작일</th><th>퇴사일</th><th>관리</th></tr></thead>
           <tbody>
-            {rows.map(r => (
+            {loading && <tr><td colSpan="5"><InlineLoadingState /></td></tr>}
+            {!loading && rows.map(r => (
               <tr key={r.id}>
                 <td>{r.store_name}</td>
                 <td>{r.role}</td>
@@ -5053,9 +5113,25 @@ function WorkHistoryInner({ employee, stores, user }) {
                 <td><div className="historyRowActions compactActions"><button className="miniBtn" onClick={()=>editHistory(r)}>수정</button><button className="miniDangerBtn" onClick={()=>deleteHistory(r)}>삭제</button></div></td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan="5" className="muted">등록된 재입사/퇴사 기록이 없습니다.</td></tr>}
+            {!loading && !rows.length && <tr><td colSpan="5" className="muted">등록된 재입사/퇴사 기록이 없습니다.</td></tr>}
           </tbody>
         </table>
+      </div>
+      <div className="mobileCardList rehireHistoryMobileList">
+        {loading && <InlineLoadingState />}
+        {!loading && rows.map(r => (
+          <div className="mobileInfoCard static rehireHistoryMobileCard" key={r.id}>
+            <div className="mobileInfoCardMain">
+              <div><strong>{r.store_name}</strong><p>{r.role} · {r.start_date} ~ {r.end_date || '현재'}</p></div>
+              <span className="requestStatusBadge finalWaiting">근무이력</span>
+            </div>
+            <div className="mobileInfoCardExtra historyRowActions compactActions">
+              <button className="miniBtn" onClick={()=>editHistory(r)}>수정</button>
+              <button className="miniDangerBtn" onClick={()=>deleteHistory(r)}>삭제</button>
+            </div>
+          </div>
+        ))}
+        {!loading && !rows.length && <EmptyStateText>등록된 재입사/퇴사 기록이 없습니다.</EmptyStateText>}
       </div>
     </section>
   );
@@ -5557,6 +5633,8 @@ function AuditLogsViewer() {
   const [loading,setLoading]=useState(true);
   const [processingId,setProcessingId]=useState(null);
   const [selectedLog, setSelectedLog] = useState(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 100;
 
   useEffect(() => { load(); }, []);
 
@@ -5589,6 +5667,9 @@ function AuditLogsViewer() {
       return text.includes(q);
     });
   }, [logs, actorFilter, actionFilter, keyword]);
+  const pageLogs = filteredLogs.slice((page - 1) * pageSize, page * pageSize);
+
+  useEffect(() => { setPage(1); }, [actorFilter, actionFilter, keyword]);
 
   return (
     <div>
@@ -5610,7 +5691,7 @@ function AuditLogsViewer() {
           </thead>
           <tbody>
             {loading && <tr><td colSpan="4"><InlineLoadingState /></td></tr>}
-            {!loading && filteredLogs.map(l => (
+            {!loading && pageLogs.map(l => (
               <tr key={l.id}>
                 <td>{formatKST(l.created_at)}</td>
                 <td>{l.actor_name}</td>
@@ -5618,14 +5699,15 @@ function AuditLogsViewer() {
                 <td>{maskSensitiveAuditDetail(l.detail || `${l.target_type || ''} ${l.target_id || ''}`)}</td>
               </tr>
             ))}
-            {!filteredLogs.length && <tr><td colSpan="4" className="muted">조건에 맞는 감사로그가 없습니다.</td></tr>}
+            {!loading && !filteredLogs.length && <tr><td colSpan="4" className="muted">조건에 맞는 감사로그가 없습니다.</td></tr>}
           </tbody>
         </table>
+        {!loading && <PaginationBar total={filteredLogs.length} page={page} onPageChange={setPage} pageSize={pageSize} />}
       </div>
 
       <div className="mobileCardList auditMobileList">
         {loading && <InlineLoadingState />}
-        {!loading && filteredLogs.map(l => (
+        {!loading && pageLogs.map(l => (
           <MobileInfoCard
             key={l.id}
             title={`${l.actor_name || '-'} · ${l.action || '-'}`}
@@ -5637,6 +5719,7 @@ function AuditLogsViewer() {
           />
         ))}
         {!loading && !filteredLogs.length && <EmptyStateText>조건에 맞는 감사로그가 없습니다.</EmptyStateText>}
+        {!loading && <PaginationBar total={filteredLogs.length} page={page} onPageChange={setPage} pageSize={pageSize} />}
       </div>
 
       {selectedLog && (
@@ -6007,6 +6090,7 @@ function HappycallAssignmentStatus({ user }) {
   const [assignmentMode, setAssignmentMode] = useState('customers');
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { load(); }, []);
 
@@ -6031,6 +6115,7 @@ function HappycallAssignmentStatus({ user }) {
   }
 
   async function load() {
+    setLoading(true);
     try {
       const [empData, targetData, logData, customerData] = await Promise.all([
         fetchAllRows('employees', 'id,name,store_name,status,role,happycall_enabled,happycall_assignment_enabled', 'name'),
@@ -6063,6 +6148,8 @@ function HappycallAssignmentStatus({ user }) {
       if ((!selectedEmployee || !visibleEmployees.some(e => e.name === selectedEmployee)) && visibleEmployees.length) setSelectedEmployee(visibleEmployees[0].name);
     } catch (e) {
       askErrorReport({ user, currentTab:'배정 현황', actionName:'배정 현황 조회', error:e });
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -6246,6 +6333,9 @@ function HappycallAssignmentStatus({ user }) {
   return (
     <div className="assignmentStatusPage">
       <h2>해피콜 배정 현황</h2>
+      {loading ? (
+        <div className="sectionCard pageLoadingPanel"><InlineLoadingState /></div>
+      ) : (<>
       <div className="sectionCard assignmentControlBar">
         <select value={selectedEmployee} onChange={e=>{setSelectedEmployee(e.target.value); setSelectedIds([]); setTargetEmployeeId('');}}>
           {employees.map(e => {
@@ -6392,9 +6482,40 @@ function HappycallAssignmentStatus({ user }) {
               )}
             </table>
           </div>
+          <div className="mobileCardList assignmentMobileRows">
+            {pageRows.map(row => {
+              if (assignmentMode === 'customers') {
+                const id = String(row.join_no);
+                const assigned = permanentAssigneeByJoinNo.get(String(row.join_no || '').trim());
+                return (
+                  <label className="mobileInfoCard static assignmentMobileCard" key={id}>
+                    <div className="mobileInfoCardMain">
+                      <div><strong>{formatCustomerJoinNo(row.join_no, customersByJoinNo, customerDisplayName(row))}</strong><p>{customerDisplayName(row)} · {displayStoreNameForUi(assigned?.store) || '-'}</p></div>
+                      <input type="checkbox" checked={selectedIds.includes(id)} onChange={()=>toggleSelected(id)} />
+                    </div>
+                    <div className="mobileInfoCardExtra">최근 개통 {row.open_date || '-'} · 담당 {assigned?.name || '-'}</div>
+                  </label>
+                );
+              }
+              const latest = latestLogByTarget[row.id];
+              const customer = customersByJoinNo[row.join_no] || {};
+              const state = latest?.review_status === '반려' ? '반려' : latest ? '완료' : '미완료';
+              return (
+                <label className="mobileInfoCard static assignmentMobileCard" key={row.id}>
+                  <div className="mobileInfoCardMain">
+                    <div><strong>{formatCustomerJoinNo(row.join_no, customersByJoinNo, row.customer_name)}</strong><p>{customerDisplayName(customer)} · {displayStoreNameForUi(currentAssigneeStore(row)) || '-'}</p></div>
+                    <input type="checkbox" checked={selectedIds.includes(row.id)} onChange={()=>toggleSelected(row.id)} />
+                  </div>
+                  <div className="mobileInfoCardExtra">{effectiveTargetDate(row) || '-'} · {callTypeLabel(row.call_type || row.target_type || '-')} · {state}</div>
+                </label>
+              );
+            })}
+            {!visibleRows.length && <EmptyStateText>{assignmentMode === 'customers' ? '표시할 배정 고객이 없습니다.' : '표시할 배정 해피콜이 없습니다.'}</EmptyStateText>}
+          </div>
           <PaginationBar total={visibleRows.length} page={page} onPageChange={setPage} pageSize={pageSize} />
         </div>
       </div>
+      </>)}
     </div>
   );
 }
@@ -6629,7 +6750,7 @@ function ReviewDashboard({ user }) {
         </div>
       </div>
 
-      <div className="sectionCard reviewListCard">
+      <div className="sectionCard reviewListCard desktopReviewListCard">
         <table className="reviewTable">
           <thead>
             <tr>
@@ -6661,6 +6782,30 @@ function ReviewDashboard({ user }) {
             {!loading && !reviewRows.length && <tr><td colSpan="9"><EmptyStateText>조건에 맞는 검수 건이 없습니다.</EmptyStateText></td></tr>}
           </tbody>
         </table>
+        <PaginationBar total={reviewRows.length} page={page} onPageChange={setPage} pageSize={pageSize} />
+      </div>
+
+      <div className="mobileCardList reviewMobileList">
+        {pageReviewRows.map(({log, target}) => {
+          const pending = (log.review_status || '검수대기') === '검수대기';
+          return (
+            <div key={log.id} className="mobileInfoCard interactive reviewMobileCard" role="button" tabIndex="0" onClick={()=>setSelected({log, target, allLogs: logs})} onKeyDown={e=>{if(e.key==='Enter') setSelected({log,target,allLogs:logs});}}>
+              <div className="mobileInfoCardMain">
+                <div>
+                  <strong>{formatCustomerJoinNo(target.join_no, customersByJoinNo, target.customer_name)}</strong>
+                  <p>{target.assigned_store} · {target.assigned_employee} · {effectiveTargetDate(target)}</p>
+                </div>
+                <span className={`requestStatusBadge ${log.review_status === '반려' ? 'rejected' : log.review_status === '검수완료' ? 'approved' : 'waiting'}`}>{log.review_status || '검수대기'}</span>
+              </div>
+              <div className="mobileInfoCardExtra reviewMobileMeta">
+                <span>{log.call_result} / {log.call_detail}</span>
+                <small>{formatKST(log.checked_at)}</small>
+              </div>
+              {pending && <label className="reviewMobileCheck" onClick={e=>e.stopPropagation()}><input type="checkbox" checked={selectedReviewIds.includes(log.id)} onChange={()=>toggleReviewSelection(log.id)} /> 선택</label>}
+            </div>
+          );
+        })}
+        {!reviewRows.length && <EmptyStateText>조건에 맞는 검수 건이 없습니다.</EmptyStateText>}
         <PaginationBar total={reviewRows.length} page={page} onPageChange={setPage} pageSize={pageSize} />
       </div>
 
@@ -7029,8 +7174,20 @@ function RawUpload({ user }) {
 function Stores({ user }) {
   const [rows, setRows] = useState([]);
   const [form, setForm] = useState({ name:'', status:'운영중', successor_store:'' });
+  const [loading, setLoading] = useState(true);
   useEffect(() => { load(); }, []);
-  async function load() { const { data } = await supabase.from('stores').select('*').order('name'); setRows(data || []); }
+  async function load() {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.from('stores').select('*').order('name');
+      if (error) throw error;
+      setRows(data || []);
+    } catch (error) {
+      alert('매장 조회 오류: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  }
   async function add() {
     if (!form.name.trim()) return alert('매장명을 입력해주세요.');
     const { error } = await supabase.from('stores').insert(form);
@@ -7049,13 +7206,35 @@ function Stores({ user }) {
         <input placeholder="승계매장" value={form.successor_store||''} onChange={e=>setForm({...form,successor_store:e.target.value})} />
         <button className="primary" onClick={add}>매장 추가</button>
       </div>
+      <div className="desktopStoreTable">
       <table><thead><tr><th>매장명</th><th>상태</th><th>승계매장</th></tr></thead>
-        <tbody>{rows.map(r => <tr key={r.id}>
+        <tbody>
+          {loading && <tr><td colSpan="3"><InlineLoadingState /></td></tr>}
+          {!loading && rows.map(r => <tr key={r.id}>
           <td>{r.name}</td>
           <td><select value={r.status||'운영중'} onChange={e=>update(r.id,{status:e.target.value})}><option>운영중</option><option>폐점</option></select></td>
           <td><input value={r.successor_store||''} onChange={e=>update(r.id,{successor_store:e.target.value})} /></td>
-        </tr>)}</tbody>
+          </tr>)}
+          {!loading && !rows.length && <tr><td colSpan="3"><EmptyStateText>등록된 매장이 없습니다.</EmptyStateText></td></tr>}
+        </tbody>
       </table>
+      </div>
+      <div className="mobileCardList storeMobileList">
+        {loading && <InlineLoadingState />}
+        {!loading && rows.map(r => (
+          <div className="mobileInfoCard static storeMobileCard" key={r.id}>
+            <div className="mobileInfoCardMain">
+              <div><strong>{r.name}</strong><p>매장 운영 상태와 승계매장을 관리합니다.</p></div>
+              <span className={`requestStatusBadge ${r.status === '폐점' ? 'rejected' : 'approved'}`}>{r.status || '운영중'}</span>
+            </div>
+            <div className="storeMobileFields">
+              <label>상태<select value={r.status||'운영중'} onChange={e=>update(r.id,{status:e.target.value})}><option>운영중</option><option>폐점</option></select></label>
+              <label>승계매장<input value={r.successor_store||''} onChange={e=>update(r.id,{successor_store:e.target.value})} placeholder="승계매장 없음" /></label>
+            </div>
+          </div>
+        ))}
+        {!loading && !rows.length && <EmptyStateText>등록된 매장이 없습니다.</EmptyStateText>}
+      </div>
     </div>
   );
 }
@@ -8033,7 +8212,7 @@ function ManagerStoreDashboardV6({ user }) {
       </div>
       <div className="sectionCard">
         <h3>직원별 진행률</h3>
-        <table>
+        <table className="managerDesktopTable">
           <thead><tr><th>담당자</th><th>전체</th><th>완료</th><th>전체 완료율</th><th>오늘 작업</th><th>오늘 완료율</th><th>경과 미완료</th><th>VOC</th></tr></thead>
           <tbody>
             {byEmployee.map(r => (
@@ -8045,9 +8224,17 @@ function ManagerStoreDashboardV6({ user }) {
                 <td>{r.overdue}</td><td>{r.voc}</td>
               </tr>
             ))}
-            {!loading && !filtered.length && <tr><td colSpan="9" className="muted">로그가 없습니다.</td></tr>}
+            {!byEmployee.length && <tr><td colSpan="8" className="muted">표시할 직원 현황이 없습니다.</td></tr>}
           </tbody>
         </table>
+        <div className="mobileCardList managerEmployeeMobileList">
+          {byEmployee.map(r => {
+            const totalRate = r.total ? Math.round(r.done/r.total*1000)/10 : 0;
+            const todayRate = r.todayTotal ? Math.round(r.todayDone/r.todayTotal*1000)/10 : 0;
+            return <MobileInfoCard key={r.name} title={r.name} subtitle={`전체 ${r.done}/${r.total} · 오늘 ${r.todayDone}/${r.todayTotal}`} meta={[`전체 완료율 ${totalRate}%`, `오늘 완료율 ${todayRate}%`, `경과 미완료 ${r.overdue}`, `VOC ${r.voc}`]} status={`${totalRate}%`} badgeClass={totalRate < 100 ? 'waiting' : 'approved'} />;
+          })}
+          {!byEmployee.length && <EmptyStateText>표시할 직원 현황이 없습니다.</EmptyStateText>}
+        </div>
       </div>
       <div className="sectionCard">
         <h3>매장 해피콜 리스트</h3>
@@ -8058,7 +8245,7 @@ function ManagerStoreDashboardV6({ user }) {
           <button className={filter==='완료'?'active':''} onClick={()=>setFilter('완료')}>완료 {stats.done}</button>
           <button className={filter==='전체'?'active':''} onClick={()=>setFilter('전체')}>전체 {stats.allTotal}</button>
         </div>
-        <table>
+        <table className="managerDesktopTable">
           <thead><tr><th>가입번호</th><th>담당자</th><th>유형</th><th>대상일</th><th>상태</th><th>결과</th></tr></thead>
           <tbody>
             {filteredTargets.map(t => {
@@ -8073,6 +8260,15 @@ function ManagerStoreDashboardV6({ user }) {
             })}
           </tbody>
         </table>
+        <div className="mobileCardList managerCallsMobileList">
+          {filteredTargets.map(t => {
+            const log = latestLogByTarget[t.id];
+            return (
+              <MobileInfoCard key={t.id} title={t.join_no} subtitle={`${t.assigned_employee} · ${callTypeLabel(t.call_type)}`} meta={[`대상일 ${effectiveTargetDate(t)}`, log ? `${log.call_result} / ${log.call_detail}` : '처리 결과 없음']} status={log ? '완료' : '미완료'} badgeClass={log ? 'approved' : 'waiting'} onClick={()=>setSelected({ ...t, latestLog: latestLogByTarget[t.id] || null })} />
+            );
+          })}
+          {!filteredTargets.length && <EmptyStateText>표시할 해피콜이 없습니다.</EmptyStateText>}
+        </div>
       </div>
       {selected && <CallModal target={selected} user={user} onClose={()=>setSelected(null)} onSaved={load} readOnly={true} />}
       </>)}
