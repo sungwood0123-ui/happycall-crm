@@ -10307,6 +10307,70 @@ td > .inlineLoadingState,
     display:flex !important;
   }
 }
+
+/* =========================================================
+   V29.55 내 프리패스: 로딩 상태·모바일 카드형 이력
+   ========================================================= */
+.freepassMyCardMeta{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-top:10px;
+  color:#64748b;
+  font-size:12px;
+  line-height:1.35;
+}
+.freepassMyCardMeta span{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.freepassMyCardMeta b{
+  flex:0 0 auto;
+  color:#0f172a;
+  font-size:14px;
+  white-space:nowrap;
+}
+.freepassMyHistoryCard em{
+  flex:0 0 auto;
+  font-size:16px;
+  font-weight:900;
+  white-space:nowrap;
+}
+.freepassMyHistoryCard em.positive{color:#155eef;}
+.freepassMyHistoryCard em.negative{color:#b42318;}
+
+@media(max-width:768px){
+  .freepassModule .sectionCard table.freepassMyDesktopTable{
+    display:none !important;
+  }
+  .freepassMyRequestMobileList,
+  .freepassMyLedgerMobileList{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:10px !important;
+    width:100% !important;
+    margin-top:12px !important;
+  }
+  .freepassMyHistoryCard{
+    min-width:0 !important;
+    padding:14px !important;
+    overflow:hidden !important;
+  }
+  .freepassMyHistoryCard .mobileInfoCardMain{
+    align-items:center !important;
+  }
+  .freepassMyHistoryCard .mobileInfoCardMain > div{
+    min-width:0 !important;
+  }
+  .freepassMyHistoryCard .mobileInfoCardExtra{
+    white-space:normal !important;
+    word-break:keep-all !important;
+    overflow-wrap:anywhere !important;
+  }
+}
 @media(max-width:360px){
   .accrualRequestCard .accrualCompactFields{
     grid-template-columns:1fr !important;

@@ -17,7 +17,7 @@ import {
   sanitizeStoredEmployee
 } from './stage1Rules.js';
 
-const APP_BUILD_VERSION = 'V29.54';
+const APP_BUILD_VERSION = 'V29.55';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -1219,6 +1219,7 @@ function FreepassModule({ user }) {
 function FreepassMyPage({ user }) {
   const [ledger,setLedger]=useState([]);
   const [requests,setRequests]=useState([]);
+  const [loading,setLoading]=useState(true);
   const [selected,setSelected]=useState(null);
   const [editMode,setEditMode]=useState(false);
   const [editDraft,setEditDraft]=useState({});
@@ -1227,11 +1228,23 @@ function FreepassMyPage({ user }) {
   useEffect(()=>{ load(); },[]);
 
   async function load(){
-    const {data:l}=await supabase.from('freepass_ledger').select('*').order('created_at',{ascending:false});
-    const {data:r}=await supabase.from('freepass_requests').select('*').eq('employee_name',user.name).order('requested_at',{ascending:false});
-    setLedger(l||[]);
-    setRequests(r||[]);
-    setMonthlyLimit(await getFreepassMonthlyLimit());
+    setLoading(true);
+    try{
+      const [{data:l,error:ledgerError},{data:r,error:requestError},limit] = await Promise.all([
+        supabase.from('freepass_ledger').select('*').eq('employee_name',user.name).order('created_at',{ascending:false}),
+        supabase.from('freepass_requests').select('*').eq('employee_name',user.name).order('requested_at',{ascending:false}),
+        getFreepassMonthlyLimit()
+      ]);
+      if(ledgerError) throw ledgerError;
+      if(requestError) throw requestError;
+      setLedger(l||[]);
+      setRequests(r||[]);
+      setMonthlyLimit(limit);
+    }catch(e){
+      askErrorReport({user,currentTab:'프리패스',actionName:'내 프리패스 이력 조회',error:e});
+    }finally{
+      setLoading(false);
+    }
   }
 
   const myRows=ledger.filter(r=>r.employee_name===user.name);
@@ -1308,10 +1321,11 @@ function FreepassMyPage({ user }) {
       <Card title="월 사용 한도" value={`${monthlyLimit}시간`} />
     </div>
 
-    <div className="sectionCard">
+    <div className="sectionCard freepassMyRequestCard">
       <h3>내 신청 현황</h3>
       <p className="muted">승인대기 중인 사용/월차전환 시간은 신청 가능 시간에서 먼저 차감됩니다.</p>
-      <table>
+      {loading && <InlineLoadingState />}
+      {!loading && requests.length > 0 && <table className="freepassMyDesktopTable">
         <thead><tr><th>요청일시</th><th>유형</th><th>실제 사용/발생일</th><th>시간</th><th>사유</th><th>상태</th></tr></thead>
         <tbody>
           {requests.map(r=><tr key={r.id} className="clickableRow" onClick={()=>openDetail(r)}>
@@ -1322,18 +1336,54 @@ function FreepassMyPage({ user }) {
             <td>{r.reason||'-'}</td>
             <td><span className={`requestStatusBadge ${pushStatusClass(r.status)}`}>{pushStatusLabel(r.status)}</span></td>
           </tr>)}
-          {!requests.length&&<tr><td colSpan="6" className="muted">신청 내역이 없습니다.</td></tr>}
         </tbody>
-      </table>
+      </table>}
+      {!loading && requests.length > 0 && <div className="mobileCardList freepassMyRequestMobileList">
+        {requests.map(r=><button type="button" key={r.id} className="mobileInfoCard freepassMyHistoryCard" onClick={()=>openDetail(r)}>
+          <div className="mobileInfoCardMain">
+            <div>
+              <strong>{freepassTypeLabel(r.request_type)} {r.use_type||''}</strong>
+              <p>실제일 {r.request_date || '-'}</p>
+            </div>
+            <span className={`requestStatusBadge ${pushStatusClass(r.status)}`}>{pushStatusLabel(r.status)}</span>
+          </div>
+          <div className="freepassMyCardMeta">
+            <span>요청 {formatKST(r.requested_at||r.created_at)}</span>
+            <b>{r.hours}시간</b>
+          </div>
+          <div className="mobileInfoCardExtra">{r.reason||'사유 없음'}</div>
+        </button>)}
+      </div>}
+      {!loading && !requests.length && <EmptyStateText>신청 내역이 없습니다.</EmptyStateText>}
     </div>
 
-    <div className="sectionCard">
+    <div className="sectionCard freepassMyLedgerCard">
       <h3>내 프리패스 이력</h3>
-      <table className="freepassLedgerTable readableFreepassTable"><thead><tr><th>구분</th><th>시간</th><th>요청일시</th><th>실제일</th><th>사유</th><th>처리자</th></tr></thead>
+      {loading && <InlineLoadingState />}
+      {!loading && myRows.length > 0 && <table className="freepassLedgerTable readableFreepassTable freepassMyDesktopTable"><thead><tr><th>구분</th><th>시간</th><th>요청일시</th><th>실제일</th><th>사유</th><th>처리자</th></tr></thead>
       <tbody>
         {myRows.map(r=><tr key={r.id}><td>{freepassTypeLabel(r.type)}</td><td>{freepassLedgerSignedHours(r)>0?`+${freepassLedgerSignedHours(r)}`:freepassLedgerSignedHours(r)}시간</td><td>{freepassRequestedDateTimeLabel(r, requestMap)}</td><td>{freepassActualDateLabel(r)}</td><td className="freepassReasonCell">{r.reason||'-'}</td><td>{r.created_by||'-'}</td></tr>)}
-        {!myRows.length&&<tr><td colSpan="6" className="muted">프리패스 이력이 없습니다.</td></tr>}
-      </tbody></table>
+      </tbody></table>}
+      {!loading && myRows.length > 0 && <div className="mobileCardList freepassMyLedgerMobileList">
+        {myRows.map(r=>{
+          const signedHours = freepassLedgerSignedHours(r);
+          return <div key={r.id} className="mobileInfoCard freepassMyHistoryCard static">
+            <div className="mobileInfoCardMain">
+              <div>
+                <strong>{freepassTypeLabel(r.type)}</strong>
+                <p>실제일 {freepassActualDateLabel(r)}</p>
+              </div>
+              <em className={signedHours >= 0 ? 'positive' : 'negative'}>{signedHours>0?`+${signedHours}`:signedHours}시간</em>
+            </div>
+            <div className="freepassMyCardMeta">
+              <span>요청 {freepassRequestedDateTimeLabel(r, requestMap)}</span>
+              <span>처리 {r.created_by||'-'}</span>
+            </div>
+            <div className="mobileInfoCardExtra">{r.reason||'사유 없음'}</div>
+          </div>;
+        })}
+      </div>}
+      {!loading && !myRows.length && <EmptyStateText>프리패스 이력이 없습니다.</EmptyStateText>}
     </div>
 
     {selected&&<div className="modalBg"><div className="modal">
