@@ -6,3 +6,4 @@
 # Generated local files.
 node_modules/
 dist/
+.vercel

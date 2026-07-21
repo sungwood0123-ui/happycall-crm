@@ -61,3 +61,9 @@ test('all date and time controls use the shared responsive UI contract', () => {
   assert.match(styles, /\.scheduleEditBox\{[\s\S]*?grid-template-columns:minmax\(0,1fr\) !important;/);
   assert.match(styles, /\.accrualRequestCard \.accrualCompactFields\{[\s\S]*?grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\) !important;/);
 });
+
+test('프리패스 일괄 처리 버튼은 직원별 개별 적용 오른쪽의 같은 조작 영역에 있다', () => {
+  assert.match(main, /<div className="bulkExecutionControls">[\s\S]*?직원별 개별 적용[\s\S]*?<button[^>]*className="primary bulkApplyButton"[^>]*>일괄 처리 적용<\/button>[\s\S]*?<\/div>/);
+  assert.match(styles, /\.bulkExecutionControls\{[\s\S]*?grid-template-columns:minmax\(190px,1fr\) auto !important;/);
+  assert.match(styles, /@media\(max-width:768px\)\{[\s\S]*?\.bulkExecutionControls\{[\s\S]*?grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\) !important;/);
+});

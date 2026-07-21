@@ -12,12 +12,28 @@ import {
   normalizeAccrualTypeValue
 } from './accrualFlow.js';
 import {
-  isActiveEmployeeSession,
-  resolveJichukRetiredSellerRule,
-  sanitizeStoredEmployee
+  resolveJichukRetiredSellerRule
 } from './stage1Rules.js';
+import {
+  isAdminLikeRole,
+  isSuperAdminRole,
+  PASSWORD_POLICY_MESSAGE,
+  validatePasswordPolicy
+} from './authSecurity.js';
+import {
+  beginLegacyPasswordMigration,
+  changeAuthenticatedPassword,
+  completeLegacyPasswordMigration,
+  loadActiveLoginDirectory,
+  loadAuthenticatedEmployee,
+  signInEmployee
+} from './authClient.js';
+import {
+  freepassBulkEmployeeKey,
+  prepareFreepassBulkAdjustment
+} from './freepassBulkAdjustment.js';
 
-const APP_BUILD_VERSION = 'V29.56';
+const APP_BUILD_VERSION = 'V29.57';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -106,6 +122,7 @@ const HAPPY_CALL_LOG_LIST_COLUMNS = [
 ].join(',');
 
 const CUSTOMER_DISPLAY_COLUMNS = 'id,join_no,customer_name,open_date,store_name,raw_store_name,seller_name';
+const EMPLOYEE_LIST_COLUMNS = 'id,name,store_name,status,created_at,role,hire_date,resign_date,happycall_enabled,happycall_assignment_enabled,end_time,password_change_required,password_changed_at,auth_user_id';
 const REFUSED_CUSTOMER_LIST_COLUMNS = 'id,join_no,target_id,refused_by,refused_at,memo,customer_name,is_minor,minor_birth_date';
 const FREEPASS_LEDGER_LIST_COLUMNS = 'id,employee_id,employee_name,employee_store,type,hours,reason,effective_date,created_by,created_at,source_request_id,reset_cycle';
 const FREEPASS_REQUEST_LOG_COLUMNS = 'id,employee_name,employee_store,request_type,request_date,hours,reason,status,requested_at,created_at,manager_approved_by,final_approved_by';
@@ -281,91 +298,90 @@ function useGlobalModalSafety() {
 function App() {
   useGlobalModalSafety();
   useEffect(() => { applyMobileTableLabels(); });
-
-  const [user, setUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('happycall_user');
-      return saved ? sanitizeStoredEmployee(JSON.parse(saved)) : null;
-    } catch {
-      localStorage.removeItem('happycall_user');
-      return null;
-    }
-  });
-  const [sessionChecking, setSessionChecking] = useState(() => Boolean(user));
+  const [user, setUser] = useState(null);
+  const [sessionChecking, setSessionChecking] = useState(true);
   const invalidSessionNotified = useRef(false);
 
   useEffect(() => {
-    if (!user?.id) {
-      setSessionChecking(false);
-      return undefined;
-    }
-
     let cancelled = false;
 
-    async function validateEmploymentSession() {
-      const { data, error } = await supabase
-        .from('employees')
-        .select('id, name, store_name, status, role, hire_date, resign_date, end_time, happycall_assignment_enabled')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (cancelled) return;
-      if (error) {
-        console.warn('employee session validation failed', error);
-        setSessionChecking(false);
-        return;
-      }
-
-      if (!isActiveEmployeeSession(data)) {
-        localStorage.removeItem('happycall_user');
-        setUser(null);
-        setSessionChecking(false);
-        if (!invalidSessionNotified.current) {
-          invalidSessionNotified.current = true;
-          alert('퇴사 처리되어 인트라넷 접속이 종료되었습니다.');
+    async function syncAuthenticatedEmployee({ notifyInvalid = false } = {}) {
+      try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
+        if (!session?.user?.id) {
+          if (!cancelled) {
+            setUser(null);
+            setSessionChecking(false);
+          }
+          return;
         }
-        return;
-      }
 
-      const safeEmployee = sanitizeStoredEmployee(data);
-      localStorage.setItem('happycall_user', JSON.stringify(safeEmployee));
-      setUser(safeEmployee);
-      setSessionChecking(false);
+        const employee = await loadAuthenticatedEmployee(supabase, session.user.id);
+        if (cancelled) return;
+        if (!employee) {
+          await supabase.auth.signOut();
+          setUser(null);
+          if (notifyInvalid && !invalidSessionNotified.current) {
+            invalidSessionNotified.current = true;
+            alert('퇴사 처리되었거나 접속 권한이 없어 로그아웃되었습니다.');
+          }
+        } else {
+          invalidSessionNotified.current = false;
+          setUser(employee);
+        }
+      } catch (error) {
+        console.warn('employee auth session validation failed', error);
+      } finally {
+        if (!cancelled) setSessionChecking(false);
+      }
     }
 
-    const handleFocus = () => validateEmploymentSession();
+    syncAuthenticatedEmployee();
+    const { data: authListener } = supabase.auth.onAuthStateChange(() => {
+      window.setTimeout(() => syncAuthenticatedEmployee(), 0);
+    });
+    const handleFocus = () => syncAuthenticatedEmployee({ notifyInvalid: true });
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') validateEmploymentSession();
+      if (document.visibilityState === 'visible') syncAuthenticatedEmployee({ notifyInvalid: true });
     };
-
-    validateEmploymentSession();
-    const intervalId = window.setInterval(validateEmploymentSession, 30 * 1000);
+    const intervalId = window.setInterval(() => syncAuthenticatedEmployee({ notifyInvalid: true }), 30 * 1000);
     window.addEventListener('focus', handleFocus);
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       cancelled = true;
+      authListener?.subscription?.unsubscribe();
       window.clearInterval(intervalId);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [user?.id]);
+  }, []);
+
+  async function refreshAuthenticatedUser() {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) {
+      setUser(null);
+      return;
+    }
+    const employee = await loadAuthenticatedEmployee(supabase, authUser.id);
+    setUser(employee);
+  }
 
   if (!supabaseUrl || !supabaseAnonKey) return <EnvMissing />;
   if (sessionChecking) return <div className="page center"><div className="loginCard"><InlineLoadingState label="접속 권한 확인 중" /></div></div>;
-  if (!user) return <Login onLogin={setUser} />;
+  if (!user) return <Login onAuthenticated={refreshAuthenticatedUser} />;
+  if (user.password_change_required) {
+    return <PasswordChangeModal user={user} forced onUserUpdate={refreshAuthenticatedUser} />;
+  }
 
   return (
     <ErrorBoundary>
       <MainApp
         user={user}
-        onUserUpdate={(nextUser) => {
-          const safeEmployee = sanitizeStoredEmployee(nextUser);
-          localStorage.setItem('happycall_user', JSON.stringify(safeEmployee));
-          setUser(safeEmployee);
-        }}
-        onLogout={() => {
-          localStorage.removeItem('happycall_user');
+        onUserUpdate={refreshAuthenticatedUser}
+        onLogout={async () => {
+          await supabase.auth.signOut();
           setUser(null);
         }}
       />
@@ -417,39 +433,73 @@ function sortEmployeesForLogin(rows) {
   });
 }
 
-function Login({ onLogin }) {
+function Login({ onAuthenticated }) {
   const [employees, setEmployees] = useState([]);
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [migration, setMigration] = useState(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   useEffect(() => { loadEmployees(); }, []);
 
   async function loadEmployees() {
-    const { data, error } = await supabase.from('employees').select('*').eq('status', '재직').order('name');
-    if (error) setErr(error.message);
-    setEmployees(sortEmployeesForLogin(data || []));
+    try {
+      const data = await loadActiveLoginDirectory(supabase);
+      setEmployees(sortEmployeesForLogin(data));
+    } catch (error) {
+      setErr('직원 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
+    }
   }
 
   async function login() {
     setErr('');
     const emp = employees.find(e => e.name === name);
     if (!emp) return setErr('직원을 선택해주세요.');
+    if (!password) return setErr('비밀번호를 입력해주세요.');
 
-    const { data: latestEmployee, error } = await supabase
-      .from('employees')
-      .select('*')
-      .eq('id', emp.id)
-      .maybeSingle();
-    if (error) return setErr('접속 권한을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.');
-    if (!isActiveEmployeeSession(latestEmployee)) {
-      await loadEmployees();
-      return setErr('퇴사 처리된 직원입니다. 관리자에게 문의하세요.');
+    setBusy(true);
+    try {
+      const { error: authError } = await signInEmployee(supabase, emp.id, password);
+      if (!authError) {
+        await onAuthenticated();
+        return;
+      }
+
+      const result = await beginLegacyPasswordMigration(supabase, emp.id, password);
+      if (result.migrated) {
+        const { error: migratedLoginError } = await signInEmployee(supabase, emp.id, password);
+        if (migratedLoginError) throw migratedLoginError;
+        await onAuthenticated();
+        return;
+      }
+      setMigration({ employee: emp, challenge: result.challenge });
+      setPassword('');
+    } catch (error) {
+      setErr(error?.message || '직원 또는 비밀번호가 맞지 않습니다.');
+    } finally {
+      setBusy(false);
     }
-    if ((latestEmployee.password || '') !== password) return setErr('비밀번호가 맞지 않습니다.');
-    const safeEmployee = sanitizeStoredEmployee(latestEmployee);
-    localStorage.setItem('happycall_user', JSON.stringify(safeEmployee));
-    onLogin(safeEmployee);
+  }
+
+  async function completeMigration() {
+    setErr('');
+    const policy = validatePasswordPolicy(newPassword);
+    if (!policy.valid) return setErr(policy.message);
+    if (newPassword !== confirmPassword) return setErr('새 비밀번호 확인이 일치하지 않습니다.');
+    setBusy(true);
+    try {
+      await completeLegacyPasswordMigration(supabase, migration.challenge, newPassword);
+      const { error } = await signInEmployee(supabase, migration.employee.id, newPassword);
+      if (error) throw error;
+      await onAuthenticated();
+    } catch (error) {
+      setErr(error?.message || '비밀번호 변경을 완료하지 못했습니다.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -457,6 +507,19 @@ function Login({ onLogin }) {
       <div className="loginCard">
         <h1>세찬컴퍼니 인트라넷</h1>
         <p className="subtitle">고객 관리 · 해피콜 · VOC 통합 시스템</p>
+        {migration ? <>
+          <div className="forcedPasswordNotice">
+            <strong>안전한 비밀번호로 변경해주세요.</strong>
+            <p>{migration.employee.name}님은 이번 한 번만 새 비밀번호를 설정하면 됩니다. 변경 전에는 다른 업무 화면으로 이동할 수 없습니다.</p>
+          </div>
+          <label>새 비밀번호</label>
+          <input type="password" autoComplete="new-password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder="영문·숫자·특수문자 포함 8자 이상" />
+          <label>새 비밀번호 확인</label>
+          <input type="password" autoComplete="new-password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter') completeMigration(); }} />
+          <p className="passwordPolicyGuide">{PASSWORD_POLICY_MESSAGE}</p>
+          {err && <p className="error">{err}</p>}
+          <button className="primary" onClick={completeMigration} disabled={busy}>{busy ? '변경 중' : '비밀번호 변경 후 로그인'}</button>
+        </> : <>
         <label>직원 선택</label>
         <select value={name} onChange={e => setName(e.target.value)}>
           <option value="">직원을 선택하세요</option>
@@ -465,46 +528,31 @@ function Login({ onLogin }) {
         <label>비밀번호</label>
         <input type="password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => { if(e.key === 'Enter') login(); }} placeholder="비밀번호 입력" />
         {err && <p className="error">{err}</p>}
-        <button className="primary" onClick={login}>로그인</button>
+        <button className="primary" onClick={login} disabled={busy}>{busy ? '확인 중' : '로그인'}</button>
+        </>}
       </div>
     </div>
   );
 }
 
-function PasswordChangeModal({ user, onClose, onUserUpdate }) {
+function PasswordChangeModal({ user, onClose, onUserUpdate, forced = false }) {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function changePassword() {
-    if (next.length < 4) return alert('새 비밀번호는 4자리 이상으로 입력해주세요.');
+    const policy = validatePasswordPolicy(next, current);
+    if (!policy.valid) return alert(policy.message);
     if (next !== confirmPw) return alert('새 비밀번호 확인이 일치하지 않습니다.');
 
     setBusy(true);
     try {
-      const { data: latestEmployee, error: lookupError } = await supabase
-        .from('employees')
-        .select('id, password, status')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (lookupError) throw lookupError;
-      if (!isActiveEmployeeSession(latestEmployee)) {
-        alert('퇴사 처리된 직원은 비밀번호를 변경할 수 없습니다.');
-        return;
-      }
-      if ((latestEmployee.password || '') !== current) {
-        alert('현재 비밀번호가 맞지 않습니다.');
-        return;
-      }
-
-      const { error } = await supabase.from('employees').update({ password: next }).eq('id', user.id);
-      if (error) throw error;
-
-      onUserUpdate(user);
+      await changeAuthenticatedPassword(supabase, user.id, current, next);
+      await onUserUpdate();
       await writeAuditLog('비밀번호변경', 'employee', user.id, user, `${user.name} 비밀번호 변경`);
       alert('비밀번호가 변경되었습니다.');
-      onClose();
+      onClose?.();
     } catch (error) {
       alert('비밀번호 변경 오류: ' + (error?.message || error));
     } finally {
@@ -515,14 +563,16 @@ function PasswordChangeModal({ user, onClose, onUserUpdate }) {
   return (
     <div className="modalBg">
       <div className="modal smallModal">
-        <div className="modalHead"><h2>비밀번호 변경</h2><button onClick={onClose}>닫기</button></div>
+        <div className="modalHead"><h2>{forced ? '비밀번호 재설정 필요' : '비밀번호 변경'}</h2>{!forced && <button onClick={onClose}>닫기</button>}</div>
         <section>
+          {forced && <div className="forcedPasswordNotice"><strong>비밀번호를 변경해야 인트라넷을 사용할 수 있습니다.</strong><p>기존 업무 권한은 그대로 유지됩니다.</p></div>}
           <label>현재 비밀번호</label>
           <input type="password" value={current} onChange={e=>setCurrent(e.target.value)} />
           <label>새 비밀번호</label>
-          <input type="password" value={next} onChange={e=>setNext(e.target.value)} />
+          <input type="password" autoComplete="new-password" value={next} onChange={e=>setNext(e.target.value)} placeholder="영문·숫자·특수문자 포함 8자 이상" />
           <label>새 비밀번호 확인</label>
-          <input type="password" value={confirmPw} onChange={e=>setConfirmPw(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter') changePassword(); }} />
+          <input type="password" autoComplete="new-password" value={confirmPw} onChange={e=>setConfirmPw(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter') changePassword(); }} />
+          <p className="passwordPolicyGuide">{PASSWORD_POLICY_MESSAGE}</p>
           <button className="primary" onClick={changePassword} disabled={busy}>변경하기</button>
         </section>
       </div>
@@ -654,10 +704,10 @@ function pushStatusClass(status) {
 }
 
 function isSuperAdmin(user) {
-  return user?.role === '최고관리자' || user?.name === '심성우' || user?.email === 'sungwood0123@gmail.com';
+  return isSuperAdminRole(user);
 }
 function isAdminLike(user) {
-  return isSuperAdmin(user) || user?.role === '관리자';
+  return isAdminLikeRole(user);
 }
 function isManagerLike(user) {
   return isAdminLike(user) || user?.role === '점장';
@@ -1444,7 +1494,7 @@ function FreepassRequestForm({ user }) {
 
   async function loadEmployeeProfile(){
     try{
-      let query = supabase.from('employees').select('*');
+      let query = supabase.from('employees').select(EMPLOYEE_LIST_COLUMNS);
       if(user?.id) query = query.eq('id', user.id);
       else query = query.eq('name', user.name);
       const {data,error}=await query.maybeSingle();
@@ -1484,7 +1534,7 @@ function FreepassRequestForm({ user }) {
     if((requestType==='야근 적립'||requestType==='휴무출근 적립') && !photoItems.length) return alert('적립 신청은 타임스탬프 사진 직접 촬영이 필요합니다.');
     setBusy(true);
     try{
-      let employeeQuery = supabase.from('employees').select('*');
+      let employeeQuery = supabase.from('employees').select(EMPLOYEE_LIST_COLUMNS);
       if(user?.id) employeeQuery = employeeQuery.eq('id', user.id);
       else employeeQuery = employeeQuery.eq('name', user.name);
       const {data:latestEmployee,error:employeeError}=await employeeQuery.maybeSingle();
@@ -2291,11 +2341,11 @@ function FreepassAdminAdjust({ user }) {
 
   async function load(){
     setLoading(true);
-    const {data}=await supabase.from('employees').select('*').eq('status','재직').order('store_name');
+    const {data}=await supabase.from('employees').select(EMPLOYEE_LIST_COLUMNS).eq('status','재직').order('store_name');
     const sorted=sortEmployeesForLogin(data||[]);
     setEmployees(sorted);
     const initial={};
-    sorted.forEach(e=>{ initial[e.id||e.name]={checked:false,type:'적립',hours:''}; });
+    sorted.forEach(e=>{ initial[freepassBulkEmployeeKey(e)]={checked:false,type:'적립',hours:''}; });
     setBulkRows(initial);
     setLoading(false);
   }
@@ -2318,30 +2368,43 @@ function FreepassAdminAdjust({ user }) {
   function updateBulkRow(key,patch){ setBulkRows(prev=>({...prev,[key]:{...(prev[key]||{}),...patch}})); }
   function selectAllBulk(checked){
     const next={};
-    employees.forEach(e=>{ const key=e.id||e.name; next[key]={...(bulkRows[key]||{type:'적립',hours:0}),checked}; });
+    employees.forEach(e=>{
+      const key=freepassBulkEmployeeKey(e);
+      next[key]={...(bulkRows[key]||{type:'적립',hours:''}),checked};
+    });
     setBulkRows(next);
   }
 
   async function saveBulk(){
     if(!isSuperAdmin(user)) return alert('최고관리자만 일괄 조정할 수 있습니다.');
     if(!bulkReason.trim()) return alert('일괄 처리 사유를 입력해주세요.');
-    if(!bulkIndividual && Number(bulkHours||0)<=0) return alert('공통 시간을 입력해주세요.');
-    const selected=employees.map(emp=>({emp,row:bulkRows[emp.id||emp.name]||{}})).filter(x=>x.row.checked && (!bulkIndividual || Number(x.row.hours||0)>0));
-    if(!selected.length) return alert('일괄 처리할 직원을 선택해주세요.');
-    if(!confirm(`${selected.length}명 프리패스를 ${bulkIndividual ? '개별 시간' : `${bulkType} ${bulkHours}시간`} 기준으로 일괄 처리합니다.\n진행할까요?`)) return;
+    const prepared=prepareFreepassBulkAdjustment({
+      employees,
+      bulkRows,
+      individual:bulkIndividual,
+      commonType:bulkType,
+      commonHours:bulkHours,
+      reason:bulkReason,
+      effectiveDate:todayLocalISO(),
+      createdBy:user.name
+    });
+    if(prepared.error==='no_selection') return alert('일괄 처리할 직원을 선택해주세요.');
+    if(prepared.error==='invalid_hours'){
+      const visible=prepared.invalidEmployees.slice(0,8).map(emp=>`${emp.store_name || '-'} · ${emp.name || '-'}`);
+      const hiddenCount=prepared.invalidEmployees.length-visible.length;
+      const suffix=hiddenCount>0 ? `\n외 ${hiddenCount}명` : '';
+      return alert(`개별 시간이 입력되지 않은 직원이 있습니다.\n\n${visible.join('\n')}${suffix}\n\n모든 선택 직원의 시간을 입력한 뒤 다시 적용해주세요.`);
+    }
+    if(!confirm(`${prepared.selected.length}명 프리패스를 ${bulkIndividual ? '개별 시간' : `${bulkType} ${bulkHours}시간`} 기준으로 일괄 처리합니다.\n진행할까요?`)) return;
     setBusy(true);
     try{
-      const rows=selected.map(({emp,row})=>{
-        const t=bulkIndividual ? (row.type||bulkType||'적립') : bulkType;
-        const h=Math.abs(Number(bulkIndividual ? row.hours : bulkHours));
-        return {employee_id:emp.id||null,employee_name:emp.name,employee_store:emp.store_name||'',type:t,hours:(t==='차감'||t==='사용처리')?-h:h,reason:bulkReason,effective_date:todayLocalISO(),created_by:user.name};
-      });
+      const rows=prepared.rows;
       const {error}=await supabase.from('freepass_ledger').insert(rows);
       if(error) throw error;
       await writeAuditLog('프리패스일괄조정','freepass_ledger','bulk',user,`${rows.length}명 / ${bulkReason}`);
       alert(`일괄 처리 완료: ${rows.length}명`);
       setBulkReason('');
-      const reset={}; employees.forEach(e=>{reset[e.id||e.name]={checked:false,type:bulkType,hours:''};});
+      const reset={}; employees.forEach(e=>{reset[freepassBulkEmployeeKey(e)]={checked:false,type:bulkType,hours:''};});
       setBulkRows(reset);
     }catch(e){ askErrorReport({user,currentTab:'프리패스',actionName:'일괄 조정',error:e}); }
     finally{ setBusy(false); }
@@ -2378,10 +2441,13 @@ function FreepassAdminAdjust({ user }) {
             <label>공통 시간
               <input type="number" min="1" step="1" value={bulkHours} onChange={e=>setBulkHours(e.target.value)} />
             </label>
-            <label className="bulkIndividualToggle">
-              <input type="checkbox" checked={bulkIndividual} onChange={e=>setBulkIndividual(e.target.checked)} />
-              직원별 개별 시간 사용
-            </label>
+            <div className="bulkExecutionControls">
+              <label className="bulkIndividualToggle">
+                <input type="checkbox" checked={bulkIndividual} onChange={e=>setBulkIndividual(e.target.checked)} />
+                직원별 개별 적용
+              </label>
+              <button type="button" className="primary bulkApplyButton" disabled={busy} onClick={saveBulk}>일괄 처리 적용</button>
+            </div>
           </div>
         </div>
         <textarea value={bulkReason} onChange={e=>setBulkReason(e.target.value)} placeholder="일괄 처리 사유 입력" />
@@ -2391,7 +2457,7 @@ function FreepassAdminAdjust({ user }) {
             {loading && <tr className="approvalEmptyRow"><td colSpan={bulkIndividual ? 6 : 4}><InlineLoadingState /></td></tr>}
             {!loading && !employees.length && <tr className="approvalEmptyRow"><td colSpan={bulkIndividual ? 6 : 4}><EmptyStateText>표시할 직원이 없습니다.</EmptyStateText></td></tr>}
             {!loading && employees.map(emp=>{
-              const key=emp.id||emp.name; const row=bulkRows[key]||{};
+              const key=freepassBulkEmployeeKey(emp); const row=bulkRows[key]||{};
               return <tr key={key}>
                 <td><input type="checkbox" checked={!!row.checked} onChange={e=>updateBulkRow(key,{checked:e.target.checked})}/></td>
                 <td>{emp.store_name}</td><td>{emp.name}</td><td>{emp.role||'직원'}</td>
@@ -2406,7 +2472,7 @@ function FreepassAdminAdjust({ user }) {
         <div className="mobileCardList freepassBulkMobileList">
           {loading && <InlineLoadingState />}
           {!loading && employees.map(emp=>{
-            const key=emp.id||emp.name; const row=bulkRows[key]||{};
+            const key=freepassBulkEmployeeKey(emp); const row=bulkRows[key]||{};
             return (
               <div className="mobileInfoCard static freepassBulkMobileCard" key={key}>
                 <div className="mobileInfoCardMain">
@@ -2422,7 +2488,6 @@ function FreepassAdminAdjust({ user }) {
           })}
           {!loading && !employees.length && <EmptyStateText>표시할 직원이 없습니다.</EmptyStateText>}
         </div>
-        <button className="primary" disabled={busy} onClick={saveBulk}>일괄 처리 저장</button>
       </div>
     </div>
   );
@@ -2583,7 +2648,7 @@ function FreepassSemiannualReset({ user }) {
   async function load(){
     setLoading(true);
     const {data:l}=await supabase.from('freepass_ledger').select('*').order('created_at',{ascending:false});
-    const {data:e}=await supabase.from('employees').select('*').eq('status','재직').order('store_name');
+    const {data:e}=await supabase.from('employees').select(EMPLOYEE_LIST_COLUMNS).eq('status','재직').order('store_name');
     setLedger(l||[]);
     const sorted=sortEmployeesForLogin(e||[]);
     setEmployees(sorted);
@@ -4019,7 +4084,7 @@ function BulkTempAssignModal({ user, targets, latestLogByTarget, onClose, onSave
   useEffect(() => { loadEmployees(); }, []);
 
   async function loadEmployees() {
-    const { data, error } = await supabase.from('employees').select('*').eq('status', '재직').order('name');
+    const { data, error } = await supabase.from('employees').select(EMPLOYEE_LIST_COLUMNS).eq('status', '재직').order('name');
     if (error) return alert('직원 목록 조회 오류: ' + error.message);
     setEmployees(data || []);
   }
@@ -4218,7 +4283,7 @@ useEffect(() => { loadDetail(); }, [target.id]);
           ? String(s.title || '').replace('D+185', 'D+183')
           : s.title
     } : null);
-    const { data: e } = await supabase.from('employees').select('*').eq('status', '재직').order('name');
+    const { data: e } = await supabase.from('employees').select(EMPLOYEE_LIST_COLUMNS).eq('status', '재직').order('name');
     setEmployees(e || []);
   }
 
@@ -4651,7 +4716,7 @@ function Employees({ user }) {
   async function load() {
     setLoading(true);
     const [{ data: empData, error: empError }, { data: storeData, error: storeError }] = await Promise.all([
-      supabase.from('employees').select('*').order('name'),
+      supabase.from('employees').select('id,name,store_name,status,role,hire_date,resign_date,happycall_enabled,happycall_assignment_enabled,end_time,password_change_required,password_changed_at,auth_user_id').order('name'),
       supabase.from('stores').select('*').order('name')
     ]);
 
@@ -4668,7 +4733,6 @@ function Employees({ user }) {
         store_name: normalizeOfficeStoreName(r.store_name || ''),
         status: r.status || '재직',
         role: r.role || '직원',
-        password: r.password || '',
         happycall_assignment_enabled: r.happycall_assignment_enabled !== false
       };
     });
@@ -4687,13 +4751,14 @@ function Employees({ user }) {
   async function add() {
     if (!form.name.trim()) return alert('직원명을 입력해주세요.');
     if (!form.store_name) return alert('매장을 선택해주세요.');
-    if (String(form.password || '').length < 4) return alert('초기 비밀번호를 4자리 이상 입력해주세요.');
+    const passwordPolicy = validatePasswordPolicy(form.password);
+    if (!passwordPolicy.valid) return alert(passwordPolicy.message);
 
     const payload = {
       name: form.name,
       store_name: form.store_name,
       status: form.status,
-      password: form.password,
+      temporary_password: form.password,
       role: form.role,
       happycall_assignment_enabled: true,
       hire_date: form.hire_date || null,
@@ -4701,22 +4766,12 @@ function Employees({ user }) {
       end_time: normalizeWorkEndTime(form.end_time || '20:00')
     };
 
-    const { error } = await supabase.from('employees').insert(payload);
-    if (error) return alert(error.message);
+    const { data, error } = await supabase.functions.invoke('employee-account', {
+      body: { action: 'create-employee', employee: payload }
+    });
+    if (error || !data?.employee) return alert(data?.error || error?.message || '직원 추가 중 오류가 발생했습니다.');
 
-    await writeAuditLog('직원추가', 'employee', form.name, user, `${form.name} / ${form.store_name} / ${form.role}`);
     setForm({ name:'', store_name: storeOptions[0]?.name || '금촌', status:'재직', password:'', role:'직원', hire_date:'', resign_date:'', end_time:'20:00' });
-    load();
-  }
-
-  async function resetPassword(employee) {
-    if (!confirm(`${employee.name} 직원의 비밀번호를 1234로 초기화할까요?`)) return;
-
-    const { error } = await supabase.from('employees').update({ password: '1234' }).eq('id', employee.id);
-    if (error) return alert(error.message);
-
-    await writeAuditLog('비밀번호초기화', 'employee', employee.id, user, `대상: ${employee.name} / 1234 초기화`);
-    alert(`${employee.name} 비밀번호가 1234로 초기화되었습니다.`);
     load();
   }
 
@@ -4797,7 +4852,7 @@ function Employees({ user }) {
           <option>검수자</option>
           <option>관리자</option><option>최고관리자</option>
         </select>
-        <input type="password" autoComplete="new-password" aria-label="초기 비밀번호" placeholder="초기 비밀번호 4자리 이상" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} />
+        <input type="password" autoComplete="new-password" aria-label="초기 비밀번호" placeholder="영문·숫자·특수문자 포함 8자 이상" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} />
         <input className="uiDateTimeInput" type="time" value={form.end_time} onChange={e=>setForm({...form,end_time:e.target.value})} title="프리패스 오후 사용 제한 기준 퇴근시간" />
         <button className="primary" onClick={add}>직원 추가</button>
       </div></div>
@@ -4890,43 +4945,21 @@ function Employees({ user }) {
 }
 
 function EmployeePasswordManageModal({ employee, user, onClose, onUpdated }) {
-  const [current, setCurrent] = useState('');
-  const [next, setNext] = useState('');
-  const [confirmPw, setConfirmPw] = useState('');
-  const [resetPw, setResetPw] = useState('1234');
+  const [issuedPassword, setIssuedPassword] = useState('');
   const [busy, setBusy] = useState(false);
   useModalBodyScrollLock();
 
-  async function changePassword() {
-    if ((employee.password || '') !== current) return alert('기존 비밀번호가 맞지 않습니다.');
-    if (!next || next.length < 4) return alert('희망 비밀번호는 4자리 이상 입력해주세요.');
-    if (next !== confirmPw) return alert('희망 비밀번호 확인이 일치하지 않습니다.');
-    if (!confirm(`${employee.name}님의 비밀번호를 변경할까요?`)) return;
-
-    setBusy(true);
-    const { error } = await supabase.from('employees').update({ password: next }).eq('id', employee.id);
-    setBusy(false);
-    if (error) return alert(error.message);
-
-    await writeAuditLog('직원비밀번호변경', 'employee', employee.id, user, `대상: ${employee.name} / 비밀번호 변경`);
-    alert('비밀번호가 변경되었습니다.');
-    onUpdated?.();
-    onClose();
-  }
-
   async function resetPassword() {
-    if (!resetPw || resetPw.length < 4) return alert('초기화 비밀번호는 4자리 이상 입력해주세요.');
-    if (!confirm(`${employee.name}님의 비밀번호를 ${resetPw}로 초기화할까요?`)) return;
+    if (!confirm(`${employee.name}님의 임시 비밀번호를 새로 발급할까요?`)) return;
 
     setBusy(true);
-    const { error } = await supabase.from('employees').update({ password: resetPw }).eq('id', employee.id);
+    const { data, error } = await supabase.functions.invoke('employee-account', {
+      body: { action: 'reset-password', employee_id: employee.id }
+    });
     setBusy(false);
-    if (error) return alert(error.message);
-
-    await writeAuditLog('직원비밀번호초기화', 'employee', employee.id, user, `대상: ${employee.name} / 초기화 비밀번호: ${resetPw}`);
-    alert('비밀번호가 초기화되었습니다.');
+    if (error || !data?.temporary_password) return alert(data?.error || error?.message || '임시 비밀번호를 발급하지 못했습니다.');
+    setIssuedPassword(data.temporary_password);
     onUpdated?.();
-    onClose();
   }
 
   return (
@@ -4935,23 +4968,18 @@ function EmployeePasswordManageModal({ employee, user, onClose, onUpdated }) {
         <div className="modalHead"><h2>{employee.name} 비밀번호 관리</h2><button onClick={onClose}>닫기</button></div>
         <div className="employeePasswordBody">
           <section>
-            <h3>비밀번호 변경</h3>
-            <p className="muted">기존 비밀번호를 확인한 뒤 희망 비밀번호로 변경합니다.</p>
-            <label>기존 비밀번호</label>
-            <input type="password" value={current} onChange={e=>setCurrent(e.target.value)} placeholder="기존 비밀번호" />
-            <label>희망 비밀번호</label>
-            <input type="password" value={next} onChange={e=>setNext(e.target.value)} placeholder="새 비밀번호" />
-            <label>희망 비밀번호 확인</label>
-            <input type="password" value={confirmPw} onChange={e=>setConfirmPw(e.target.value)} placeholder="새 비밀번호 재입력" onKeyDown={e=>{ if(e.key==='Enter') changePassword(); }} />
-            <button className="primary" onClick={changePassword} disabled={busy}>비밀번호 변경</button>
-          </section>
-
-          <section>
-            <h3>비밀번호 초기화</h3>
-            <p className="muted">직원이 비밀번호를 모를 때 관리자가 지정한 값으로 초기화합니다.</p>
-            <label>초기화 비밀번호</label>
-            <input value={resetPw} onChange={e=>setResetPw(e.target.value)} placeholder="예: 1234" />
-            <button className="blackButton" onClick={resetPassword} disabled={busy}>비밀번호 초기화</button>
+            <h3>임시 비밀번호 발급</h3>
+            <p className="muted">임시 비밀번호는 한 번만 표시됩니다. 직원은 로그인 직후 본인 비밀번호로 반드시 변경해야 합니다.</p>
+            {!issuedPassword && <button className="blackButton" onClick={resetPassword} disabled={busy}>{busy ? '발급 중' : '새 임시 비밀번호 발급'}</button>}
+            {issuedPassword && <div className="temporaryPasswordResult" role="status">
+              <span>직원에게 전달할 임시 비밀번호</span>
+              <strong>{issuedPassword}</strong>
+              <button type="button" onClick={async()=>{
+                try { await navigator.clipboard.writeText(issuedPassword); alert('임시 비밀번호를 복사했습니다.'); }
+                catch { alert(`임시 비밀번호: ${issuedPassword}`); }
+              }}>복사</button>
+              <p>이 화면을 닫으면 다시 확인할 수 없습니다.</p>
+            </div>}
           </section>
         </div>
       </div>

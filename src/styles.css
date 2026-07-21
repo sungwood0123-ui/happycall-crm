@@ -8257,7 +8257,7 @@ button.primary,
 
 .bulkCommonInputs{
   display:grid !important;
-  grid-template-columns:140px 120px auto !important;
+  grid-template-columns:140px 120px minmax(300px,1fr) !important;
   gap:10px !important;
   align-items:end !important;
 }
@@ -8292,6 +8292,24 @@ button.primary,
   width:18px !important;
   height:18px !important;
   margin:0 !important;
+}
+
+.bulkExecutionControls{
+  display:grid !important;
+  grid-template-columns:minmax(190px,1fr) auto !important;
+  gap:10px !important;
+  align-items:end !important;
+  min-width:0 !important;
+}
+
+.bulkApplyButton{
+  width:auto !important;
+  min-width:142px !important;
+  height:36px !important;
+  min-height:36px !important;
+  margin:0 !important;
+  padding:0 16px !important;
+  white-space:nowrap !important;
 }
 
 /* 전체현황 테이블 밀도/여백 */
@@ -8613,8 +8631,23 @@ button.primary,
     gap:10px !important;
   }
 
-  .bulkIndividualToggle{
+  .bulkExecutionControls{
     grid-column:1 / -1 !important;
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
+  }
+
+  .bulkIndividualToggle,
+  .bulkApplyButton{
+    width:100% !important;
+    min-width:0 !important;
+    height:42px !important;
+    min-height:42px !important;
+  }
+
+  .bulkIndividualToggle{
+    justify-content:center !important;
+    padding:0 8px !important;
+    white-space:nowrap !important;
   }
 
   .freepassBulkTable.compactFreepassTable{
@@ -10713,3 +10746,28 @@ td > .inlineLoadingState,
     }
   }
 }
+.forcedPasswordNotice{
+  display:grid;
+  gap:6px;
+  margin:0 0 18px;
+  padding:14px 16px;
+  border:1px solid #bfdbfe;
+  border-radius:14px;
+  background:#eff6ff;
+  color:#1e3a5f;
+}
+.forcedPasswordNotice strong{font-size:15px;line-height:1.45;}
+.forcedPasswordNotice p{margin:0;color:#4b6380;font-size:13px;line-height:1.55;}
+.passwordPolicyGuide{margin:8px 0 14px;color:#64748b;font-size:12px;line-height:1.5;}
+.temporaryPasswordResult{
+  display:grid;
+  gap:10px;
+  margin-top:14px;
+  padding:16px;
+  border:1px solid #93c5fd;
+  border-radius:14px;
+  background:#eff6ff;
+}
+.temporaryPasswordResult span{font-size:13px;color:#475569;}
+.temporaryPasswordResult strong{font-size:20px;letter-spacing:.04em;word-break:break-all;}
+.temporaryPasswordResult p{margin:0;color:#b42318;font-size:12px;}
