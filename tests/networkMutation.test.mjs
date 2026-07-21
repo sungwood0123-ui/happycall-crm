@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createClientUuid, isTransientNetworkError, runNetworkMutation, runNetworkRead } from '../src/networkMutation.js';
+import {
+  createClientUuid,
+  isTransientNetworkError,
+  runNetworkMutation,
+  runNetworkRead,
+  subscribeNetworkMutationSuccess
+} from '../src/networkMutation.js';
 
 test('Load failed는 잠시 기다린 뒤 성공할 때까지 재시도한다', async () => {
   let calls = 0;
@@ -22,6 +28,23 @@ test('권한·검증 오류는 재시도하지 않는다', async () => {
   }, 3, [0, 0]), /permission denied/);
 
   assert.equal(calls, 1);
+});
+
+test('저장이 성공한 경우에만 최신 자료 재조회 신호를 보낸다', async () => {
+  let notifications = 0;
+  const unsubscribe = subscribeNetworkMutationSuccess(() => { notifications += 1; });
+
+  try {
+    await runNetworkMutation(async () => ({ data: { saved: true }, error: null }));
+    await assert.rejects(
+      () => runNetworkMutation(async () => ({ data: null, error: new Error('save failed') }), 1),
+      /save failed/
+    );
+  } finally {
+    unsubscribe();
+  }
+
+  assert.equal(notifications, 1);
 });
 
 test('조회 중 Load failed와 일시적인 503 오류는 자동 재시도한다', async () => {
