@@ -7,6 +7,24 @@ export function isTransientNetworkError(error) {
     || message.includes('network error');
 }
 
+const mutationSuccessListeners = new Set();
+
+export function subscribeNetworkMutationSuccess(listener) {
+  if (typeof listener !== 'function') return () => {};
+  mutationSuccessListeners.add(listener);
+  return () => mutationSuccessListeners.delete(listener);
+}
+
+function notifyMutationSuccess(result) {
+  mutationSuccessListeners.forEach(listener => {
+    try {
+      listener(result);
+    } catch {
+      // Cache invalidation or other observers must never break the saved operation.
+    }
+  });
+}
+
 function waitForRetry(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -17,6 +35,7 @@ export async function runNetworkMutation(operation, attempts = 3, retryDelays = 
     try {
       const result = await operation();
       if (result?.error) throw result.error;
+      notifyMutationSuccess(result);
       return result;
     } catch (error) {
       lastError = error;

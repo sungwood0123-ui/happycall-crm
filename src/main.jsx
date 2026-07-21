@@ -4,7 +4,13 @@ import { createPortal } from 'react-dom';
 import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import './styles.css';
-import { createClientUuid, runNetworkMutation, runNetworkRead } from './networkMutation.js';
+import {
+  createClientUuid,
+  runNetworkMutation,
+  runNetworkRead,
+  subscribeNetworkMutationSuccess
+} from './networkMutation.js';
+import { createAsyncQueryCache } from './asyncQueryCache.js';
 import {
   accrualHistoryRows,
   findHolidayAccrualDraft,
@@ -33,7 +39,7 @@ import {
   prepareFreepassBulkAdjustment
 } from './freepassBulkAdjustment.js';
 
-const APP_BUILD_VERSION = 'V29.57';
+const APP_BUILD_VERSION = 'V29.58';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -41,7 +47,23 @@ const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '');
 
 const pendingErrorReportKeys = new Set();
 
-async function fetchAllRows(tableName, selectText = '*', orderColumn = null) {
+const happycallFullQueryCache = createAsyncQueryCache({ ttlMs: 60000 });
+const HAPPYCALL_CACHE_TABLES = new Set(['happycall_targets', 'happycall_logs', 'customers']);
+let happycallCacheAuthScope = 'anonymous';
+
+function invalidateHappycallDataCache() {
+  happycallFullQueryCache.clear();
+}
+
+subscribeNetworkMutationSuccess(invalidateHappycallDataCache);
+
+supabase.auth.onAuthStateChange((_event, session) => {
+  const nextScope = session?.user?.id || 'anonymous';
+  if (nextScope !== happycallCacheAuthScope) invalidateHappycallDataCache();
+  happycallCacheAuthScope = nextScope;
+});
+
+async function fetchAllRowsUncached(tableName, selectText = '*', orderColumn = null) {
   const pageSize = 1000;
   let from = 0;
   let allRows = [];
@@ -61,6 +83,18 @@ async function fetchAllRows(tableName, selectText = '*', orderColumn = null) {
   }
 
   return allRows;
+}
+
+async function fetchAllRows(tableName, selectText = '*', orderColumn = null) {
+  if (!HAPPYCALL_CACHE_TABLES.has(tableName)) {
+    return fetchAllRowsUncached(tableName, selectText, orderColumn);
+  }
+
+  const cacheKey = [happycallCacheAuthScope, tableName, selectText, orderColumn || ''].join('|');
+  return happycallFullQueryCache.getOrLoad(
+    cacheKey,
+    () => fetchAllRowsUncached(tableName, selectText, orderColumn)
+  );
 }
 
 async function fetchRowsByIds(tableName, ids, selectText = '*', chunkSize = 100) {
@@ -4130,6 +4164,7 @@ function BulkTempAssignModal({ user, targets, latestLogByTarget, onClose, onSave
         if (error) throw error;
       }
       await writeAuditLog('임시처리자일괄변경', 'happycall_targets', user.store_name, user, `D+93/D+183 ${selectedIds.length}건 → ${assignee}`);
+      invalidateHappycallDataCache();
       alert(`임시 배정 완료: ${selectedIds.length}건`);
       onSaved();
       onClose();
@@ -4358,6 +4393,7 @@ useEffect(() => { loadDetail(); }, [target.id]);
       if (error) throw error;
 
       await writeAuditLog('임시처리자변경', 'happycall_target', target.id, user, `${target.join_no} / ${target.assigned_employee} → ${tempAssignee}`);
+      invalidateHappycallDataCache();
       alert('임시 처리자가 변경되었습니다.');
       onSaved();
       onClose();
@@ -4380,6 +4416,7 @@ useEffect(() => { loadDetail(); }, [target.id]);
         reason: joinNoReason,
         user
       });
+      invalidateHappycallDataCache();
       alert('가입번호가 수정되었습니다.');
       onSaved();
       onClose();
@@ -6345,6 +6382,7 @@ function HappycallAssignmentStatus({ user }) {
       if (error) throw error;
 
       await writeAuditLog('고객담당자영구변경', 'customers', 'bulk', user, `${rows.length}명 / ${selectedEmployee} → ${targetEmp.store_name} · ${targetEmp.name}`);
+      invalidateHappycallDataCache();
       alert(`${rows.length}명의 고객 담당자가 ${targetEmp.name}님으로 변경되었습니다.`);
       setSelectedIds([]);
       setTargetEmployeeId('');
@@ -6372,6 +6410,7 @@ function HappycallAssignmentStatus({ user }) {
       if (error) throw error;
 
       await writeAuditLog('해피콜일회성재배정', 'happycall_targets', 'bulk', user, `${rows.length}건 / ${selectedEmployee} → ${targetEmp.store_name} · ${targetEmp.name}`);
+      invalidateHappycallDataCache();
       alert(`${rows.length}건의 해피콜 처리자가 ${targetEmp.name}님으로 변경되었습니다.`);
       setSelectedIds([]);
       setTargetEmployeeId('');
@@ -6718,6 +6757,7 @@ function ReviewDashboard({ user }) {
       }).in('id', ids);
       if (error) throw error;
       await writeAuditLog('검수일괄완료', 'happycall_log', 'bulk', user, `${rows.length}건 일괄 승인`);
+      invalidateHappycallDataCache();
       alert(`${rows.length}건 검수 완료 처리되었습니다.`);
       setSelectedReviewIds([]);
       load();
@@ -6754,6 +6794,7 @@ function ReviewDashboard({ user }) {
       }
 
       await writeAuditLog('검수일괄반려', 'happycall_log', 'bulk', user, `${rows.length}건 일괄 반려 / ${memo}`);
+      invalidateHappycallDataCache();
       alert(`${rows.length}건 반려 처리되었습니다.`);
       setSelectedReviewIds([]);
       load();
@@ -6901,6 +6942,7 @@ function ReviewModal({ item, user, onClose, onSaved }) {
       if (error) throw error;
 
       await writeAuditLog('검수완료', 'happycall_log', log.id, user, `${target.join_no} / ${target.assigned_employee} / ${log.call_result} / ${log.call_detail}`);
+      invalidateHappycallDataCache();
       alert('검수 완료 처리되었습니다.');
       onSaved();
       onClose();
@@ -6931,6 +6973,7 @@ function ReviewModal({ item, user, onClose, onSaved }) {
       }
 
       await writeAuditLog('검수반려', 'happycall_log', log.id, user, `${target.join_no} / ${target.assigned_employee} / 반려사유: ${memo}`);
+      invalidateHappycallDataCache();
       alert('반려 처리되었습니다.');
       onSaved();
       onClose();
@@ -7148,6 +7191,7 @@ function RawUpload({ user }) {
         saved += chunk.length;
       }
       await writeAuditLog('RAW저장', 'customers', 'bulk', user, `customers ${saved}건 저장/업데이트`);
+      invalidateHappycallDataCache();
       alert(`저장 완료: ${saved}건 저장/업데이트`);
     } catch (e) {
       alert('DB 저장 오류: ' + e.message);
@@ -7961,6 +8005,7 @@ function TargetGenerator({ user }) {
       }
 
       await writeAuditLog('해피콜대상저장', 'happycall_targets', targetDate, user, `${targetDate} 신규 ${saved}건 / 기존 ${summary.saveRows.length - saved}건 건너뜀`);
+      invalidateHappycallDataCache();
       alert(`저장 완료: 신규 ${saved}건 / 기존 ${summary.saveRows.length - saved}건 건너뜀`);
     } catch(e) {
       alert('DB 저장 오류: ' + e.message);
@@ -8026,6 +8071,7 @@ function TargetGenerator({ user }) {
       if (error) throw error;
 
       await writeAuditLog('해피콜대상삭제', 'happycall_targets', targetDate, user, `${targetDate} 삭제 ${deletableIds.length}건 / 로그연결 제외 ${count - deletableIds.length}건`);
+      invalidateHappycallDataCache();
       alert(`삭제 완료: ${deletableIds.length}건\n로그 연결 제외: ${count - deletableIds.length}건`);
       setSummary(null);
       setPreview([]);
