@@ -29,6 +29,24 @@ export async function signInEmployee(supabase, employeeId, password) {
   return supabase.auth.signInWithPassword({ email: employeeAuthEmail(employeeId), password });
 }
 
+export async function resetEmployeeTemporaryPassword(supabase, employeeId) {
+  const { data, error } = await supabase.functions.invoke('employee-account', {
+    body: { action: 'reset-password', employee_id: employeeId }
+  });
+
+  if (error || !data?.temporary_password) {
+    let serverMessage = data?.error || '';
+    if (!serverMessage && error?.context instanceof Response) {
+      try {
+        const body = await error.context.clone().json();
+        serverMessage = body?.error || '';
+      } catch {}
+    }
+    throw new Error(serverMessage || error?.message || '임시 비밀번호를 발급하지 못했습니다.');
+  }
+  return data;
+}
+
 export async function beginLegacyPasswordMigration(supabase, employeeId, password) {
   const { data, error } = await supabase.functions.invoke('employee-auth', {
     body: { action: 'begin-migration', employee_id: employeeId, password }

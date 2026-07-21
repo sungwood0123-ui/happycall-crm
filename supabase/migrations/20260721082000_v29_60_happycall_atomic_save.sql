@@ -205,4 +205,3 @@ from public.happycall_logs latest
 where refused.join_no = '500289727061'
   and latest.id = 'd0b44c1f-83de-476a-9471-22b36c024e18'::uuid
   and latest.join_no = refused.join_no;
-

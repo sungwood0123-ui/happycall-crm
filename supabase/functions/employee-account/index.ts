@@ -109,11 +109,40 @@ async function createEmployee(actor: { name: string }, payload: Record<string, u
 
 async function resetPassword(actor: { name: string }, employeeId: string) {
   const { data: employee } = await service.from('employees').select('id,name,status,auth_user_id').eq('id', employeeId).maybeSingle();
-  if (!employee || employee.status !== '재직' || !employee.auth_user_id) return json(400, { error: '재직 중인 로그인 계정을 확인할 수 없습니다.' });
+  if (!employee || employee.status !== '재직') return json(400, { error: '재직 중인 직원만 임시 비밀번호를 발급할 수 있습니다.' });
   const temporaryPassword = randomTemporaryPassword();
-  const { error } = await service.auth.admin.updateUserById(employee.auth_user_id, { password: temporaryPassword });
-  if (error) return json(500, { error: '임시 비밀번호를 설정하지 못했습니다.' });
-  await service.from('employees').update({ password_change_required: true }).eq('id', employee.id);
+  let authUserId = employee.auth_user_id;
+
+  if (!authUserId) {
+    const { data: created, error: createError } = await service.auth.admin.createUser({
+      email: authEmail(employee.id),
+      password: temporaryPassword,
+      email_confirm: true,
+      user_metadata: { employee_id: employee.id, employee_name: employee.name }
+    });
+    if (createError || !created.user) return json(500, { error: '직원 로그인 계정을 만들지 못했습니다.' });
+
+    const { data: linked, error: linkError } = await service.from('employees').update({
+      auth_user_id: created.user.id,
+      password_change_required: true,
+      password_changed_at: null
+    }).eq('id', employee.id).is('auth_user_id', null).select('id').maybeSingle();
+
+    if (linkError || !linked) {
+      await service.auth.admin.deleteUser(created.user.id);
+      return json(409, { error: '다른 요청에서 계정이 먼저 연결되었습니다. 다시 발급해주세요.' });
+    }
+    authUserId = created.user.id;
+    await service.from('employee_legacy_credentials').delete().eq('employee_id', employee.id);
+  } else {
+    const { error } = await service.auth.admin.updateUserById(authUserId, { password: temporaryPassword });
+    if (error) return json(500, { error: '임시 비밀번호를 설정하지 못했습니다.' });
+    const { error: employeeError } = await service.from('employees').update({
+      password_change_required: true,
+      password_changed_at: null
+    }).eq('id', employee.id);
+    if (employeeError) return json(500, { error: '비밀번호 변경 필요 상태를 저장하지 못했습니다.' });
+  }
   await service.from('audit_logs').insert({
     action: '비밀번호초기화', target_type: 'employee', target_id: employee.id, actor_name: actor.name,
     detail: `${employee.name} 임시 비밀번호 발급 / 최초 로그인 시 변경 필요`

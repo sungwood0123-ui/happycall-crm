@@ -40,6 +40,30 @@ test('employee creation and reset require an active admin role', () => {
   assert.match(accountFunction, /password_change_required:\s*true/);
 });
 
+test('temporary password issuance repairs an active employee without a linked auth account', () => {
+  assert.match(accountFunction, /if \(!authUserId\)/);
+  assert.match(accountFunction, /service\.auth\.admin\.createUser/);
+  assert.match(accountFunction, /email:\s*authEmail\(employee\.id\)/);
+  assert.match(accountFunction, /auth_user_id:\s*created\.user\.id/);
+  assert.match(accountFunction, /employee_legacy_credentials/);
+  assert.match(accountFunction, /password_changed_at:\s*null/);
+});
+
+test('temporary password errors show the server reason instead of a generic edge error', () => {
+  assert.match(authClient, /error\.context\.clone\(\)\.json\(\)/);
+  assert.match(authClient, /serverMessage\s*=\s*body\?\.error/);
+  assert.match(main, /resetEmployeeTemporaryPassword\(supabase, employee\.id\)/);
+});
+
+test('remember login stores only a seven day browser trust marker and never a password', () => {
+  assert.match(main, /REMEMBER_LOGIN_MS\s*=\s*7\s*\*\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/);
+  assert.match(main, /auth_user_id:\s*authUserId/);
+  assert.match(main, /expires_at:\s*Date\.now\(\)\s*\+\s*REMEMBER_LOGIN_MS/);
+  assert.doesNotMatch(main, /REMEMBER_LOGIN_KEY[\s\S]{0,500}password/);
+  assert.match(main, /clearLoginPreference\(\);[\s\S]{0,120}supabase\.auth\.signOut/);
+  assert.match(main, /setInterval\(\(\)\s*=>\s*syncAuthenticatedEmployee[\s\S]{0,100}30\s*\*\s*1000/);
+});
+
 test('deployment sends baseline browser security headers', () => {
   const allHeaders = vercel.headers.flatMap(entry => entry.headers || []);
   const headerMap = new Map(allHeaders.map(header => [header.key.toLowerCase(), header.value]));
