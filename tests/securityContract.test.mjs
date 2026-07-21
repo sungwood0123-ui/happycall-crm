@@ -6,6 +6,7 @@ const main = readFileSync(new URL('../src/main.jsx', import.meta.url), 'utf8');
 const authClient = readFileSync(new URL('../src/authClient.js', import.meta.url), 'utf8');
 const authFunction = readFileSync(new URL('../supabase/functions/employee-auth/index.ts', import.meta.url), 'utf8');
 const accountFunction = readFileSync(new URL('../supabase/functions/employee-account/index.ts', import.meta.url), 'utf8');
+const passwordHistoryMigration = readFileSync(new URL('../supabase/migrations/20260721183000_v29_61_password_expiry_history.sql', import.meta.url), 'utf8');
 const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -20,7 +21,8 @@ test('employee passwords are not read or written directly by the browser', () =>
   assert.doesNotMatch(main, /from\(['"]employees['"]\)[\s\S]{0,100}update\(\{\s*password\s*:/);
   assert.doesNotMatch(main, /\.eq\(['"]password['"]/);
   assert.match(authClient, /supabase\.auth\.signInWithPassword/);
-  assert.match(authClient, /supabase\.auth\.updateUser/);
+  assert.doesNotMatch(authClient, /supabase\.auth\.updateUser/);
+  assert.match(authClient, /action:\s*'change-password'/);
 });
 
 test('legacy login transition is one-time and rate limited', () => {
@@ -62,6 +64,24 @@ test('remember login stores only a seven day browser trust marker and never a pa
   assert.doesNotMatch(main, /REMEMBER_LOGIN_KEY[\s\S]{0,500}password/);
   assert.match(main, /clearLoginPreference\(\);[\s\S]{0,120}supabase\.auth\.signOut/);
   assert.match(main, /setInterval\(\(\)\s*=>\s*syncAuthenticatedEmployee[\s\S]{0,100}30\s*\*\s*1000/);
+});
+
+test('password changes are server verified and the previous password cannot be reused', () => {
+  assert.match(authClient, /action:\s*'change-password'/);
+  assert.doesNotMatch(authClient, /supabase\.auth\.updateUser\(\{ password: nextPassword \}\)/);
+  assert.match(accountFunction, /wasLastUserPassword/);
+  assert.match(accountFunction, /PBKDF2/);
+  assert.match(accountFunction, /PASSWORD_HASH_ITERATIONS\s*=\s*210000/);
+  assert.match(accountFunction, /직전에 사용한 비밀번호는 다시 사용할 수 없습니다/);
+  assert.doesNotMatch(accountFunction, /action === 'mark-password-changed'/);
+});
+
+test('password history is inaccessible to browser roles and stores no plaintext password', () => {
+  assert.match(passwordHistoryMigration, /enable row level security/);
+  assert.match(passwordHistoryMigration, /revoke all on table public\.employee_password_history from public, anon, authenticated/);
+  assert.match(passwordHistoryMigration, /password_hash text not null/);
+  assert.match(passwordHistoryMigration, /password_salt text not null/);
+  assert.doesNotMatch(passwordHistoryMigration, /password_plain|plain_password/);
 });
 
 test('deployment sends baseline browser security headers', () => {

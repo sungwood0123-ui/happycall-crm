@@ -32,6 +32,68 @@ function randomTemporaryPassword() {
   return `Sc!${body}7`;
 }
 
+const PASSWORD_HASH_ITERATIONS = 210000;
+
+function bytesToBase64(bytes: Uint8Array) {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+function base64ToBytes(value: string) {
+  return Uint8Array.from(atob(value), char => char.charCodeAt(0));
+}
+
+async function passwordFingerprint(password: string, salt: Uint8Array, iterations = PASSWORD_HASH_ITERATIONS) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits']
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
+    key,
+    256
+  );
+  return bytesToBase64(new Uint8Array(bits));
+}
+
+function constantTimeEqual(left: string, right: string) {
+  let difference = left.length ^ right.length;
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    difference |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
+  }
+  return difference === 0;
+}
+
+async function wasLastUserPassword(employeeId: string, password: string) {
+  const { data } = await service
+    .from('employee_password_history')
+    .select('password_hash,password_salt,hash_iterations')
+    .eq('employee_id', employeeId)
+    .maybeSingle();
+  if (!data?.password_hash || !data?.password_salt) return false;
+  const fingerprint = await passwordFingerprint(
+    password,
+    base64ToBytes(data.password_salt),
+    Number(data.hash_iterations) || PASSWORD_HASH_ITERATIONS
+  );
+  return constantTimeEqual(fingerprint, data.password_hash);
+}
+
+async function saveLastUserPassword(employeeId: string, password: string) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const passwordHash = await passwordFingerprint(password, salt);
+  return service.from('employee_password_history').upsert({
+    employee_id: employeeId,
+    password_hash: passwordHash,
+    password_salt: bytesToBase64(salt),
+    hash_iterations: PASSWORD_HASH_ITERATIONS,
+    changed_at: new Date().toISOString()
+  }, { onConflict: 'employee_id' });
+}
+
 async function actorFromRequest(req: Request) {
   const authorization = req.headers.get('Authorization') || '';
   const userClient = createClient(SUPABASE_URL, ANON_KEY, {
@@ -53,12 +115,64 @@ function isAdminLike(actor: { role?: string } | null) {
   return actor?.role === '관리자' || actor?.role === '최고관리자';
 }
 
-async function markPasswordChanged(actor: { id: string }) {
-  const { error } = await service.from('employees').update({
+async function changePassword(
+  actor: { id: string; name: string; auth_user_id?: string | null },
+  employeeId: string,
+  currentPassword: string,
+  newPassword: string
+) {
+  if (!actor.auth_user_id || employeeId !== actor.id) {
+    return json(403, { error: '본인의 비밀번호만 변경할 수 있습니다.' });
+  }
+  if (!passwordPolicy(newPassword)) {
+    return json(400, { error: '비밀번호는 8자 이상이며 영문, 숫자, 특수문자를 각각 포함해야 합니다.' });
+  }
+  if (!currentPassword || currentPassword === newPassword) {
+    return json(400, { error: '직전에 사용한 비밀번호와 다른 비밀번호를 입력해주세요.' });
+  }
+
+  const verifier = createClient(SUPABASE_URL, ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+  const { error: verifyError } = await verifier.auth.signInWithPassword({
+    email: authEmail(actor.id),
+    password: currentPassword
+  });
+  if (verifyError) return json(401, { error: '현재 비밀번호가 맞지 않습니다.' });
+
+  if (await wasLastUserPassword(actor.id, newPassword)) {
+    return json(400, { error: '직전에 사용한 비밀번호는 다시 사용할 수 없습니다.' });
+  }
+
+  const { error: updateError } = await service.auth.admin.updateUserById(actor.auth_user_id, {
+    password: newPassword
+  });
+  if (updateError) return json(500, { error: '새 비밀번호를 설정하지 못했습니다.' });
+
+  const { error: historyError } = await saveLastUserPassword(actor.id, newPassword);
+  if (historyError) {
+    await service.from('employees').update({ password_change_required: true }).eq('id', actor.id);
+    return json(500, { error: '비밀번호는 변경됐지만 보안 기록을 완료하지 못했습니다. 새 비밀번호로 다시 로그인해 변경을 완료해주세요.' });
+  }
+
+  const changedAt = new Date().toISOString();
+  const { error: employeeError } = await service.from('employees').update({
     password_change_required: false,
-    password_changed_at: new Date().toISOString()
+    password_changed_at: changedAt
   }).eq('id', actor.id);
-  return error ? json(500, { error: '비밀번호 변경 상태를 저장하지 못했습니다.' }) : json(200, { completed: true });
+  if (employeeError) {
+    await service.from('employees').update({ password_change_required: true }).eq('id', actor.id);
+    return json(500, { error: '비밀번호 변경 상태를 저장하지 못했습니다. 새 비밀번호로 다시 로그인해주세요.' });
+  }
+
+  await service.from('audit_logs').insert({
+    action: '비밀번호변경',
+    target_type: 'employee',
+    target_id: actor.id,
+    actor_name: actor.name,
+    detail: `${actor.name} 비밀번호 변경 / 90일 후 재설정`
+  });
+  return json(200, { completed: true, password_changed_at: changedAt });
 }
 
 async function createEmployee(actor: { name: string }, payload: Record<string, unknown>) {
@@ -157,7 +271,14 @@ Deno.serve(async (req: Request) => {
     const actor = await actorFromRequest(req);
     if (!actor) return json(401, { error: '로그인이 필요합니다.' });
     const body = await req.json();
-    if (body?.action === 'mark-password-changed') return markPasswordChanged(actor);
+    if (body?.action === 'change-password') {
+      return changePassword(
+        actor,
+        String(body.employee_id || ''),
+        String(body.current_password || ''),
+        String(body.new_password || '')
+      );
+    }
     if (!isAdminLike(actor)) return json(403, { error: '관리자 권한이 필요합니다.' });
     if (body?.action === 'create-employee') return createEmployee(actor, body.employee || {});
     if (body?.action === 'reset-password') return resetPassword(actor, String(body.employee_id || ''));

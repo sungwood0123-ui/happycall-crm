@@ -67,3 +67,12 @@ test('프리패스 일괄 처리 버튼은 직원별 개별 적용 오른쪽의 
   assert.match(styles, /\.bulkExecutionControls\{[\s\S]*?grid-template-columns:minmax\(190px,1fr\) auto !important;/);
   assert.match(styles, /@media\(max-width:768px\)\{[\s\S]*?\.bulkExecutionControls\{[\s\S]*?grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\) !important;/);
 });
+
+test('모바일 체크 선택 영역은 문구와 조작 요소가 시각적으로 균형을 이룬다', () => {
+  assert.match(main, /className="rememberLoginCopy"/);
+  assert.match(main, /className="rememberLoginControl"/);
+  assert.match(styles, /\.rememberLoginOption\{[\s\S]*?justify-content:space-between!important;/);
+  assert.match(main, /className="minorCheckLabel"[\s\S]*?<span>미성년자<\/span><span className="minorCheckSpacer"/);
+  assert.match(styles, /\.minorCheckLabel\{[\s\S]*?grid-template-columns:20px minmax\(0, 1fr\) 20px !important;/);
+  assert.equal((styles.match(/(?:^|\n)\.minorCheckLabel\{/g) || []).length, 1);
+});

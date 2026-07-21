@@ -2208,17 +2208,6 @@ input.requiredInput::placeholder{
   max-width:180px !important;
   width:180px !important;
 }
-.minorCheckLabel{
-  height:40px;
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  font-weight:800;
-  padding:0 10px;
-  border:1px solid #e5e7eb;
-  border-radius:10px;
-  background:#f9fafb;
-}
 .minorInfoBox{
   display:grid;
   grid-template-columns:1fr 180px;
@@ -2292,24 +2281,6 @@ input.requiredInput::placeholder{
   min-height:44px !important;
   box-sizing:border-box !important;
 }
-.minorCheckLabel{
-  height:44px !important;
-  min-height:44px !important;
-  min-width:116px !important;
-  display:inline-flex !important;
-  align-items:center !important;
-  justify-content:center !important;
-  gap:6px !important;
-  padding:0 12px !important;
-  box-sizing:border-box !important;
-  white-space:nowrap !important;
-  line-height:1 !important;
-  word-break:keep-all !important;
-}
-.minorCheckLabel input{
-  flex:0 0 auto !important;
-  margin:0 !important;
-}
 .minorInfoBox{
   display:grid !important;
   grid-template-columns:minmax(0, 1fr) 190px !important;
@@ -2344,9 +2315,6 @@ input.requiredInput::placeholder{
   .callResultSelect.compact{
     width:100% !important;
     max-width:none !important;
-  }
-  .minorCheckLabel{
-    width:100% !important;
   }
   .minorInfoBox{
     grid-template-columns:1fr !important;
@@ -2399,9 +2367,9 @@ input.requiredInput::placeholder{
   width:auto !important;
   min-width:112px !important;
   max-width:140px !important;
-  display:inline-flex !important;
+  display:grid !important;
+  grid-template-columns:20px minmax(0, 1fr) 20px !important;
   align-items:center !important;
-  justify-content:center !important;
   gap:7px !important;
   padding:0 12px !important;
   margin:0 !important;
@@ -2416,6 +2384,17 @@ input.requiredInput::placeholder{
   white-space:nowrap !important;
   word-break:keep-all !important;
   overflow:hidden !important;
+}
+
+.minorCheckLabel > span:not(.minorCheckSpacer){
+  min-width:0 !important;
+  text-align:center !important;
+}
+
+.minorCheckSpacer{
+  display:block !important;
+  width:20px !important;
+  height:1px !important;
 }
 
 .minorCheckLabel input{
@@ -2535,7 +2514,6 @@ input.requiredInput::placeholder{
   .minorCheckLabel{
     width:100% !important;
     max-width:none !important;
-    justify-content:center !important;
     min-width:0 !important;
   }
 
@@ -10759,11 +10737,65 @@ td > .inlineLoadingState,
 .forcedPasswordNotice strong{font-size:15px;line-height:1.45;}
 .forcedPasswordNotice p{margin:0;color:#4b6380;font-size:13px;line-height:1.55;}
 .passwordPolicyGuide{margin:8px 0 14px;color:#64748b;font-size:12px;line-height:1.5;}
-.rememberLoginOption{display:flex!important;align-items:flex-start;gap:10px;margin:14px 0 4px;cursor:pointer;}
-.rememberLoginOption input{width:18px!important;height:18px!important;min-height:18px!important;margin:2px 0 0;padding:0;flex:0 0 auto;}
-.rememberLoginOption span{display:grid;gap:3px;line-height:1.35;}
+.rememberLoginOption{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:16px!important;
+  width:100%!important;
+  margin:14px 0 8px!important;
+  padding:12px 14px!important;
+  border:1px solid #dbe3ee!important;
+  border-radius:14px!important;
+  background:#f8fafc!important;
+  box-sizing:border-box!important;
+  cursor:pointer;
+}
+.rememberLoginCopy{display:grid!important;gap:3px!important;min-width:0!important;line-height:1.35!important;}
 .rememberLoginOption strong{font-size:14px;color:#172033;}
 .rememberLoginOption small{font-size:12px;color:#64748b;font-weight:400;}
+.rememberLoginControl{
+  position:relative!important;
+  display:block!important;
+  width:44px!important;
+  height:24px!important;
+  flex:0 0 44px!important;
+}
+.rememberLoginControl input{
+  position:absolute!important;
+  inset:0!important;
+  z-index:2!important;
+  width:44px!important;
+  height:24px!important;
+  min-height:24px!important;
+  margin:0!important;
+  padding:0!important;
+  opacity:0!important;
+  cursor:pointer!important;
+}
+.rememberLoginControl span{
+  position:absolute!important;
+  inset:0!important;
+  display:block!important;
+  border-radius:999px!important;
+  background:#cbd5e1!important;
+  transition:background .16s ease!important;
+}
+.rememberLoginControl span::after{
+  content:""!important;
+  position:absolute!important;
+  top:3px!important;
+  left:3px!important;
+  width:18px!important;
+  height:18px!important;
+  border-radius:50%!important;
+  background:#fff!important;
+  box-shadow:0 1px 3px rgba(15,23,42,.28)!important;
+  transition:transform .16s ease!important;
+}
+.rememberLoginControl input:checked + span{background:#2563eb!important;}
+.rememberLoginControl input:checked + span::after{transform:translateX(20px)!important;}
+.rememberLoginControl input:focus-visible + span{outline:3px solid rgba(37,99,235,.22)!important;outline-offset:2px!important;}
 .temporaryPasswordGuide{margin:0 0 14px;padding:14px 16px;border:1px solid #dbe5f1;border-radius:14px;background:#f8fafc;}
 .temporaryPasswordGuide strong{display:block;margin-bottom:8px;font-size:14px;}
 .temporaryPasswordGuide ol{margin:0;padding-left:20px;color:#526174;font-size:13px;line-height:1.65;}

@@ -48,6 +48,35 @@ function authEmail(employeeId: string) {
   return `${employeeId}@login.sechan.company`;
 }
 
+const PASSWORD_HASH_ITERATIONS = 210000;
+
+function bytesToBase64(bytes: Uint8Array) {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+async function saveLastUserPassword(employeeId: string, password: string) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits']
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: PASSWORD_HASH_ITERATIONS },
+    key,
+    256
+  );
+  return service.from('employee_password_history').upsert({
+    employee_id: employeeId,
+    password_hash: bytesToBase64(new Uint8Array(bits)),
+    password_salt: bytesToBase64(salt),
+    hash_iterations: PASSWORD_HASH_ITERATIONS,
+    changed_at: new Date().toISOString()
+  }, { onConflict: 'employee_id' });
+}
+
 async function constantTimeTextEqual(left: string, right: string) {
   const [leftHash, rightHash] = await Promise.all([sha256(left), sha256(right)]);
   let difference = leftHash.length ^ rightHash.length;
@@ -83,6 +112,17 @@ async function createEmployeeAuth(employee: { id: string; name: string }, passwo
   if (employeeError) {
     await service.auth.admin.deleteUser(created.user.id);
     return { error: employeeError };
+  }
+
+  const { error: historyError } = await saveLastUserPassword(employee.id, password);
+  if (historyError) {
+    await service.from('employees').update({
+      auth_user_id: null,
+      password_change_required: true,
+      password_changed_at: null
+    }).eq('id', employee.id).eq('auth_user_id', created.user.id);
+    await service.auth.admin.deleteUser(created.user.id);
+    return { error: historyError };
   }
 
   await service.from('employee_legacy_credentials').delete().eq('employee_id', employee.id);
