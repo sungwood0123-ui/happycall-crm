@@ -25,6 +25,7 @@ import {
   isAdminLikeRole,
   isSuperAdminRole,
   PASSWORD_POLICY_MESSAGE,
+  requiresPasswordChange,
   validatePasswordPolicy
 } from './authSecurity.js';
 import {
@@ -41,7 +42,7 @@ import {
   prepareFreepassBulkAdjustment
 } from './freepassBulkAdjustment.js';
 
-const APP_BUILD_VERSION = 'V29.60';
+const APP_BUILD_VERSION = 'V29.61';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -471,7 +472,7 @@ function App() {
   if (!supabaseUrl || !supabaseAnonKey) return <EnvMissing />;
   if (sessionChecking) return <div className="page center"><div className="loginCard"><InlineLoadingState label="접속 권한 확인 중" /></div></div>;
   if (!user) return <Login onAuthenticated={refreshAuthenticatedUser} />;
-  if (user.password_change_required) {
+  if (requiresPasswordChange(user)) {
     return <PasswordChangeModal user={user} forced onUserUpdate={refreshAuthenticatedUser} />;
   }
 
@@ -634,8 +635,8 @@ function Login({ onAuthenticated }) {
         <label>비밀번호</label>
         <input type="password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => { if(e.key === 'Enter') login(); }} placeholder="비밀번호 입력" />
         <label className="rememberLoginOption">
-          <input type="checkbox" checked={rememberLogin} onChange={e=>setRememberLogin(e.target.checked)} />
-          <span><strong>이 브라우저에서 7일간 자동 로그인</strong><small>개인 휴대폰이나 개인 PC에서만 사용하세요.</small></span>
+          <span className="rememberLoginCopy"><strong>7일간 자동 로그인</strong><small>개인 휴대폰이나 개인 PC에서만 사용하세요.</small></span>
+          <span className="rememberLoginControl"><input type="checkbox" checked={rememberLogin} onChange={e=>setRememberLogin(e.target.checked)} /><span aria-hidden="true" /></span>
         </label>
         {err && <p className="error">{err}</p>}
         <button className="primary" onClick={login} disabled={busy}>{busy ? '확인 중' : '로그인'}</button>
@@ -675,7 +676,7 @@ function PasswordChangeModal({ user, onClose, onUserUpdate, forced = false }) {
       <div className="modal smallModal">
         <div className="modalHead"><h2>{forced ? '비밀번호 재설정 필요' : '비밀번호 변경'}</h2>{!forced && <button onClick={onClose}>닫기</button>}</div>
         <section>
-          {forced && <div className="forcedPasswordNotice"><strong>비밀번호를 변경해야 인트라넷을 사용할 수 있습니다.</strong><p>기존 업무 권한은 그대로 유지됩니다.</p></div>}
+          {forced && <div className="forcedPasswordNotice"><strong>{user.password_change_required ? '비밀번호를 변경해야 인트라넷을 사용할 수 있습니다.' : '비밀번호 사용 기간 90일이 지나 재설정이 필요합니다.'}</strong><p>직전에 사용한 비밀번호는 다시 사용할 수 없으며, 기존 업무 권한은 그대로 유지됩니다.</p></div>}
           <label>현재 비밀번호</label>
           <input type="password" value={current} onChange={e=>setCurrent(e.target.value)} />
           <label>새 비밀번호</label>
@@ -4690,7 +4691,7 @@ async function save() {
                 <select className={`callResultSelect compact ${result === '통화 완료' || result === '통화완료' ? 'success' : result === '부재중' ? 'warning' : result === '통화 불가' ? 'danger' : ''}`} value={result} onChange={e => onResultChange(e.target.value)}>
                   {Object.keys(CALL_RESULTS).map(v => <option key={v} className={v === '통화 완료' || v === '통화완료' ? 'optionSuccess' : v === '부재중' ? 'optionWarning' : v === '통화 불가' ? 'optionDanger' : ''}>{v}</option>)}
                 </select>
-                <label className="minorCheckLabel"><input type="checkbox" checked={isMinorChecked} onChange={e=>setIsMinorChecked(e.target.checked)} /> 미성년자</label>
+                <label className="minorCheckLabel"><input type="checkbox" checked={isMinorChecked} onChange={e=>setIsMinorChecked(e.target.checked)} /><span>미성년자</span><span className="minorCheckSpacer" aria-hidden="true" /></label>
               </div>
               <div className="callResultLegend">
                 <span className="success">통화 완료</span>

@@ -29,20 +29,24 @@ export async function signInEmployee(supabase, employeeId, password) {
   return supabase.auth.signInWithPassword({ email: employeeAuthEmail(employeeId), password });
 }
 
+async function edgeFunctionErrorMessage(error, data, fallback) {
+  let serverMessage = data?.error || '';
+  if (!serverMessage && error?.context instanceof Response) {
+    try {
+      const body = await error.context.clone().json();
+      serverMessage = body?.error || '';
+    } catch {}
+  }
+  return serverMessage || error?.message || fallback;
+}
+
 export async function resetEmployeeTemporaryPassword(supabase, employeeId) {
   const { data, error } = await supabase.functions.invoke('employee-account', {
     body: { action: 'reset-password', employee_id: employeeId }
   });
 
   if (error || !data?.temporary_password) {
-    let serverMessage = data?.error || '';
-    if (!serverMessage && error?.context instanceof Response) {
-      try {
-        const body = await error.context.clone().json();
-        serverMessage = body?.error || '';
-      } catch {}
-    }
-    throw new Error(serverMessage || error?.message || '임시 비밀번호를 발급하지 못했습니다.');
+    throw new Error(await edgeFunctionErrorMessage(error, data, '임시 비밀번호를 발급하지 못했습니다.'));
   }
   return data;
 }
@@ -66,22 +70,20 @@ export async function completeLegacyPasswordMigration(supabase, challenge, newPa
   return data;
 }
 
-export async function markPasswordChanged(supabase) {
-  const { data, error } = await supabase.functions.invoke('employee-account', {
-    body: { action: 'mark-password-changed' }
-  });
-  if (error || !data?.completed) throw new Error(data?.error || error?.message || '비밀번호 변경 상태를 저장하지 못했습니다.');
-  return data;
-}
-
 export async function changeAuthenticatedPassword(supabase, employeeId, currentPassword, nextPassword) {
   const policy = validatePasswordPolicy(nextPassword, currentPassword);
   if (!policy.valid) throw new Error(policy.message);
 
-  const { error: loginError } = await signInEmployee(supabase, employeeId, currentPassword);
-  if (loginError) throw new Error('현재 비밀번호가 맞지 않습니다.');
-
-  const { error: updateError } = await supabase.auth.updateUser({ password: nextPassword });
-  if (updateError) throw updateError;
-  await markPasswordChanged(supabase);
+  const { data, error } = await supabase.functions.invoke('employee-account', {
+    body: {
+      action: 'change-password',
+      employee_id: employeeId,
+      current_password: currentPassword,
+      new_password: nextPassword
+    }
+  });
+  if (error || !data?.completed) {
+    throw new Error(await edgeFunctionErrorMessage(error, data, '비밀번호를 변경하지 못했습니다.'));
+  }
+  return data;
 }

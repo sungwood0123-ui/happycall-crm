@@ -5,6 +5,8 @@ import {
   canAccessScreen,
   employeeSessionProfile,
   isAdminLikeRole,
+  isPasswordExpired,
+  requiresPasswordChange,
   isSuperAdminRole,
   validatePasswordPolicy
 } from '../src/authSecurity.js';
@@ -17,6 +19,15 @@ test('비밀번호는 영문 숫자 특수문자를 포함한 8자 이상만 허
   assert.equal(validatePasswordPolicy('Abcd1234').valid, false);
   assert.equal(validatePasswordPolicy('Abcd 123!').valid, false);
   assert.equal(validatePasswordPolicy('Abc!1234', 'Abc!1234').valid, false);
+});
+
+test('비밀번호는 마지막 변경 후 90일이 지나면 강제 변경한다', () => {
+  const now = new Date('2026-07-21T00:00:00Z').getTime();
+  assert.equal(isPasswordExpired('2026-04-23T00:00:01Z', now), false);
+  assert.equal(isPasswordExpired('2026-04-22T00:00:00Z', now), true);
+  assert.equal(isPasswordExpired(null, now), true);
+  assert.equal(requiresPasswordChange({ password_change_required: false, password_changed_at: '2026-04-22T00:00:00Z' }, now), true);
+  assert.equal(requiresPasswordChange({ password_change_required: true, password_changed_at: '2026-07-20T00:00:00Z' }, now), true);
 });
 
 test('최고관리자 판정은 이름이나 이메일이 아니라 저장된 권한만 사용한다', () => {

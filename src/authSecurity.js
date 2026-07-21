@@ -1,4 +1,6 @@
 export const PASSWORD_POLICY_MESSAGE = '비밀번호는 8자 이상이며 영문, 숫자, 특수문자를 각각 1개 이상 포함해야 합니다.';
+export const PASSWORD_MAX_AGE_DAYS = 90;
+export const PASSWORD_MAX_AGE_MS = PASSWORD_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
 
 export function validatePasswordPolicy(value, previousValue = '') {
   const password = String(value || '');
@@ -17,6 +19,17 @@ export function validatePasswordPolicy(value, previousValue = '') {
     failures,
     message: failures.length === 0 ? '' : `${PASSWORD_POLICY_MESSAGE} (${failures.join(', ')})`
   };
+}
+
+export function isPasswordExpired(passwordChangedAt, now = Date.now()) {
+  if (!passwordChangedAt) return true;
+  const changedAt = new Date(passwordChangedAt).getTime();
+  if (!Number.isFinite(changedAt)) return true;
+  return now - changedAt >= PASSWORD_MAX_AGE_MS;
+}
+
+export function requiresPasswordChange(employee, now = Date.now()) {
+  return Boolean(employee?.password_change_required) || isPasswordExpired(employee?.password_changed_at, now);
 }
 
 export function isSuperAdminRole(user) {
