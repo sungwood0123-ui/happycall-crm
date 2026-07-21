@@ -33,6 +33,7 @@ import {
   completeLegacyPasswordMigration,
   loadActiveLoginDirectory,
   loadAuthenticatedEmployee,
+  resetEmployeeTemporaryPassword,
   signInEmployee
 } from './authClient.js';
 import {
@@ -40,11 +41,70 @@ import {
   prepareFreepassBulkAdjustment
 } from './freepassBulkAdjustment.js';
 
-const APP_BUILD_VERSION = 'V29.59';
+const APP_BUILD_VERSION = 'V29.60';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '');
+
+const REMEMBER_LOGIN_KEY = 'sechan_remember_login_v1';
+const LOGIN_POLICY_READY_KEY = 'sechan_login_policy_ready_v1';
+const TAB_LOGIN_KEY = 'sechan_tab_login_v1';
+const PENDING_LOGIN_KEY = 'sechan_pending_login_v1';
+const REMEMBER_LOGIN_MS = 7 * 24 * 60 * 60 * 1000;
+
+function readRememberedLogin(authUserId = '') {
+  try {
+    const saved = JSON.parse(localStorage.getItem(REMEMBER_LOGIN_KEY) || 'null');
+    const valid = saved?.auth_user_id && saved.auth_user_id === authUserId && Number(saved.expires_at) > Date.now();
+    if (!valid && saved) localStorage.removeItem(REMEMBER_LOGIN_KEY);
+    return valid ? saved : null;
+  } catch {
+    try { localStorage.removeItem(REMEMBER_LOGIN_KEY); } catch {}
+    return null;
+  }
+}
+
+function markLoginPreference(authUserId, remember) {
+  try {
+    localStorage.setItem(LOGIN_POLICY_READY_KEY, '1');
+    if (remember) {
+      localStorage.setItem(REMEMBER_LOGIN_KEY, JSON.stringify({
+        auth_user_id: authUserId,
+        expires_at: Date.now() + REMEMBER_LOGIN_MS
+      }));
+      sessionStorage.removeItem(TAB_LOGIN_KEY);
+    } else {
+      localStorage.removeItem(REMEMBER_LOGIN_KEY);
+      sessionStorage.setItem(TAB_LOGIN_KEY, authUserId);
+    }
+  } catch {}
+}
+
+function clearLoginPreference() {
+  try { localStorage.removeItem(REMEMBER_LOGIN_KEY); } catch {}
+  try { sessionStorage.removeItem(TAB_LOGIN_KEY); } catch {}
+  try { sessionStorage.removeItem(PENDING_LOGIN_KEY); } catch {}
+}
+
+function isLoginAllowedInThisBrowser(authUserId) {
+  if (readRememberedLogin(authUserId)) return true;
+  try {
+    const pending = sessionStorage.getItem(PENDING_LOGIN_KEY);
+    if (pending === 'remember' || pending === 'session') {
+      sessionStorage.removeItem(PENDING_LOGIN_KEY);
+      markLoginPreference(authUserId, pending === 'remember');
+      return true;
+    }
+    if (sessionStorage.getItem(TAB_LOGIN_KEY) === authUserId) return true;
+    if (!localStorage.getItem(LOGIN_POLICY_READY_KEY)) {
+      localStorage.setItem(LOGIN_POLICY_READY_KEY, '1');
+      sessionStorage.setItem(TAB_LOGIN_KEY, authUserId);
+      return true;
+    }
+  } catch {}
+  return false;
+}
 
 const pendingErrorReportKeys = new Set();
 
@@ -346,10 +406,20 @@ function App() {
           return;
         }
 
+        if (!isLoginAllowedInThisBrowser(session.user.id)) {
+          await supabase.auth.signOut({ scope: 'local' });
+          if (!cancelled) {
+            setUser(null);
+            setSessionChecking(false);
+          }
+          return;
+        }
+
         const employee = await loadAuthenticatedEmployee(supabase, session.user.id);
         if (cancelled) return;
         if (!employee) {
-          await supabase.auth.signOut();
+          clearLoginPreference();
+          await supabase.auth.signOut({ scope: 'local' });
           setUser(null);
           if (notifyInvalid && !invalidSessionNotified.current) {
             invalidSessionNotified.current = true;
@@ -387,12 +457,13 @@ function App() {
     };
   }, []);
 
-  async function refreshAuthenticatedUser() {
+  async function refreshAuthenticatedUser({ remember = null } = {}) {
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) {
       setUser(null);
       return;
     }
+    if (remember !== null) markLoginPreference(authUser.id, remember);
     const employee = await loadAuthenticatedEmployee(supabase, authUser.id);
     setUser(employee);
   }
@@ -410,7 +481,8 @@ function App() {
         user={user}
         onUserUpdate={refreshAuthenticatedUser}
         onLogout={async () => {
-          await supabase.auth.signOut();
+          clearLoginPreference();
+          await supabase.auth.signOut({ scope: 'local' });
           setUser(null);
         }}
       />
@@ -471,6 +543,7 @@ function Login({ onAuthenticated }) {
   const [migration, setMigration] = useState(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [rememberLogin, setRememberLogin] = useState(false);
 
   useEffect(() => { loadEmployees(); }, []);
 
@@ -489,11 +562,12 @@ function Login({ onAuthenticated }) {
     if (!emp) return setErr('직원을 선택해주세요.');
     if (!password) return setErr('비밀번호를 입력해주세요.');
 
+    try { sessionStorage.setItem(PENDING_LOGIN_KEY, rememberLogin ? 'remember' : 'session'); } catch {}
     setBusy(true);
     try {
       const { error: authError } = await signInEmployee(supabase, emp.id, password);
       if (!authError) {
-        await onAuthenticated();
+        await onAuthenticated({ remember: rememberLogin });
         return;
       }
 
@@ -501,12 +575,13 @@ function Login({ onAuthenticated }) {
       if (result.migrated) {
         const { error: migratedLoginError } = await signInEmployee(supabase, emp.id, password);
         if (migratedLoginError) throw migratedLoginError;
-        await onAuthenticated();
+        await onAuthenticated({ remember: rememberLogin });
         return;
       }
       setMigration({ employee: emp, challenge: result.challenge });
       setPassword('');
     } catch (error) {
+      try { sessionStorage.removeItem(PENDING_LOGIN_KEY); } catch {}
       setErr(error?.message || '직원 또는 비밀번호가 맞지 않습니다.');
     } finally {
       setBusy(false);
@@ -521,10 +596,12 @@ function Login({ onAuthenticated }) {
     setBusy(true);
     try {
       await completeLegacyPasswordMigration(supabase, migration.challenge, newPassword);
+      try { sessionStorage.setItem(PENDING_LOGIN_KEY, rememberLogin ? 'remember' : 'session'); } catch {}
       const { error } = await signInEmployee(supabase, migration.employee.id, newPassword);
       if (error) throw error;
-      await onAuthenticated();
+      await onAuthenticated({ remember: rememberLogin });
     } catch (error) {
+      try { sessionStorage.removeItem(PENDING_LOGIN_KEY); } catch {}
       setErr(error?.message || '비밀번호 변경을 완료하지 못했습니다.');
     } finally {
       setBusy(false);
@@ -556,6 +633,10 @@ function Login({ onAuthenticated }) {
         </select>
         <label>비밀번호</label>
         <input type="password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => { if(e.key === 'Enter') login(); }} placeholder="비밀번호 입력" />
+        <label className="rememberLoginOption">
+          <input type="checkbox" checked={rememberLogin} onChange={e=>setRememberLogin(e.target.checked)} />
+          <span><strong>이 브라우저에서 7일간 자동 로그인</strong><small>개인 휴대폰이나 개인 PC에서만 사용하세요.</small></span>
+        </label>
         {err && <p className="error">{err}</p>}
         <button className="primary" onClick={login} disabled={busy}>{busy ? '확인 중' : '로그인'}</button>
         </>}
@@ -1193,8 +1274,9 @@ function UpdateNotice({ user, currentTab }) {
   );
 }
 
-function AutoLogoutGuard({ onLogout }) {
+function AutoLogoutGuard({ onLogout, remembered = false }) {
   useEffect(() => {
+    if (remembered) return undefined;
     const TIMEOUT_MS = 60 * 60 * 1000;
     const WARN_MS = 55 * 60 * 1000;
     let warnTimer;
@@ -1222,7 +1304,7 @@ function AutoLogoutGuard({ onLogout }) {
       clearTimeout(logoutTimer);
       events.forEach(ev => window.removeEventListener(ev, resetTimers));
     };
-  }, [onLogout]);
+  }, [onLogout, remembered]);
 
   return null;
 }
@@ -3448,7 +3530,7 @@ function MainApp({ user, onLogout, onUserUpdate }) {
 
   return (
     <div className="app">
-      <AutoLogoutGuard onLogout={onLogout} />
+      <AutoLogoutGuard onLogout={onLogout} remembered={Boolean(readRememberedLogin(user?.auth_user_id))} />
       <UpdateNotice user={user} currentTab={tab} />
       <header>
         <div>
@@ -4488,57 +4570,31 @@ async function save() {
       };
 
       const existingPending = latestLog && (latestLog.review_status || '검수대기') === '검수대기' ? latestLog : null;
-      if (existingPending) {
-        await runNetworkMutation(() => supabase.from('happycall_logs').update({
-          ...payload,
-          checked_at: new Date().toISOString()
-        }).eq('id', existingPending.id));
-      } else {
-        if (!saveOperationIdRef.current) saveOperationIdRef.current = createClientUuid();
-        await runNetworkMutation(() => supabase.from('happycall_logs').upsert({
-          id: saveOperationIdRef.current,
-          ...payload,
-          parent_log_id: latestLog?.review_status === '반려' ? latestLog.id : null,
-          review_round: latestLog?.review_status === '반려' ? (Number(latestLog.review_round || 1) + 1) : 1
-        }, { onConflict: 'id' }));
-      }
+      if (!saveOperationIdRef.current) saveOperationIdRef.current = existingPending?.id || createClientUuid();
+      if (detail === '불만사항있음' && !vocOperationIdRef.current) vocOperationIdRef.current = createClientUuid();
+      const savedAt = new Date().toISOString();
 
-      if (shouldExcludeUnavailable(result)) {
-        await runNetworkMutation(() => supabase.from('refused_customers').upsert({
-          join_no: target.join_no,
-          target_id: target.id,
-          refused_by: user.name,
-          refused_at: new Date().toISOString(),
-          memo: memo || detail || '통화 불가',
-          legal_rep_join_no: null
-        }, { onConflict: 'join_no' }));
-
-        await runNetworkMutation(() => supabase.from('happycall_targets')
-          .update({ is_skipped: true, skip_reason: `통화 불가 처리: ${detail}` })
-          .eq('join_no', target.join_no)
-          .neq('id', target.id)
-          .is('is_skipped', false)
-          .not('call_type', 'in', '(D_PLUS_93,D_PLUS_183,D_PLUS_95,D_PLUS_185)'));
-      } else {
-        await runNetworkMutation(() => supabase.from('refused_customers').delete().eq('join_no', target.join_no));
-      }
-
-      if (typeof rejectedInfo !== 'undefined' && rejectedInfo?.id) {
-        await runNetworkMutation(() => supabase.from('happycall_logs').update({
-          review_status: '재처리완료'
-        }).eq('id', rejectedInfo.id));
-      }
-
-      if (detail === '불만사항있음') {
-        if (!vocOperationIdRef.current) vocOperationIdRef.current = createClientUuid();
-        await runNetworkMutation(() => supabase.from('voc_logs').upsert({
-          id: vocOperationIdRef.current,
-          target_id: target.id,
-          join_no: target.join_no,
-          customer_issue: memo,
-          status: '미처리'
-        }, { onConflict: 'id' }));
-      }
+      await runNetworkMutation(() => supabase.rpc('save_happycall_core', {
+        p_log_id: saveOperationIdRef.current,
+        p_existing_log_id: existingPending?.id || null,
+        p_target_id: target.id,
+        p_join_no: target.join_no,
+        p_employee_name: user.name,
+        p_call_result: payload.call_result,
+        p_call_detail: payload.call_detail,
+        p_memo: payload.memo,
+        p_legal_rep_join_no: payload.legal_rep_join_no,
+        p_is_minor: payload.is_minor,
+        p_minor_birth_date: payload.minor_birth_date,
+        p_parent_log_id: latestLog?.review_status === '반려' ? latestLog.id : null,
+        p_review_round: latestLog?.review_status === '반려' ? (Number(latestLog.review_round || 1) + 1) : 1,
+        p_should_refuse: shouldExcludeUnavailable(result),
+        p_refused_at: savedAt,
+        p_skip_reason: `통화 불가 처리: ${detail}`,
+        p_rejected_log_id: typeof rejectedInfo !== 'undefined' ? (rejectedInfo?.id || null) : null,
+        p_voc_id: detail === '불만사항있음' ? vocOperationIdRef.current : null,
+        p_voc_issue: detail === '불만사항있음' ? memo : null
+      }));
 
       await writeAuditLog('해피콜저장', 'happycall_target', target.id, user, `${target.join_no} / ${result} / ${detail}`);
       saveOperationIdRef.current = null;
@@ -5001,13 +5057,15 @@ function EmployeePasswordManageModal({ employee, user, onClose, onUpdated }) {
     if (!confirm(`${employee.name}님의 임시 비밀번호를 새로 발급할까요?`)) return;
 
     setBusy(true);
-    const { data, error } = await supabase.functions.invoke('employee-account', {
-      body: { action: 'reset-password', employee_id: employee.id }
-    });
-    setBusy(false);
-    if (error || !data?.temporary_password) return alert(data?.error || error?.message || '임시 비밀번호를 발급하지 못했습니다.');
-    setIssuedPassword(data.temporary_password);
-    onUpdated?.();
+    try {
+      const data = await resetEmployeeTemporaryPassword(supabase, employee.id);
+      setIssuedPassword(data.temporary_password);
+      onUpdated?.();
+    } catch (error) {
+      alert(error?.message || '임시 비밀번호를 발급하지 못했습니다.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -5017,7 +5075,10 @@ function EmployeePasswordManageModal({ employee, user, onClose, onUpdated }) {
         <div className="employeePasswordBody">
           <section>
             <h3>임시 비밀번호 발급</h3>
-            <p className="muted">임시 비밀번호는 한 번만 표시됩니다. 직원은 로그인 직후 본인 비밀번호로 반드시 변경해야 합니다.</p>
+            <div className="temporaryPasswordGuide">
+              <strong>발급 후 사용 방법</strong>
+              <ol><li>화면에 한 번 표시되는 임시 비밀번호를 직원에게 전달합니다.</li><li>직원은 본인 이름과 임시 비밀번호로 로그인합니다.</li><li>새 비밀번호로 변경해야 업무 화면을 사용할 수 있습니다.</li></ol>
+            </div>
             {!issuedPassword && <button className="blackButton" onClick={resetPassword} disabled={busy}>{busy ? '발급 중' : '새 임시 비밀번호 발급'}</button>}
             {issuedPassword && <div className="temporaryPasswordResult" role="status">
               <span>직원에게 전달할 임시 비밀번호</span>

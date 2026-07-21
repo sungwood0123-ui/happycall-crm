@@ -10759,6 +10759,17 @@ td > .inlineLoadingState,
 .forcedPasswordNotice strong{font-size:15px;line-height:1.45;}
 .forcedPasswordNotice p{margin:0;color:#4b6380;font-size:13px;line-height:1.55;}
 .passwordPolicyGuide{margin:8px 0 14px;color:#64748b;font-size:12px;line-height:1.5;}
+.rememberLoginOption{display:flex!important;align-items:flex-start;gap:10px;margin:14px 0 4px;cursor:pointer;}
+.rememberLoginOption input{width:18px!important;height:18px!important;min-height:18px!important;margin:2px 0 0;padding:0;flex:0 0 auto;}
+.rememberLoginOption span{display:grid;gap:3px;line-height:1.35;}
+.rememberLoginOption strong{font-size:14px;color:#172033;}
+.rememberLoginOption small{font-size:12px;color:#64748b;font-weight:400;}
+.temporaryPasswordGuide{margin:0 0 14px;padding:14px 16px;border:1px solid #dbe5f1;border-radius:14px;background:#f8fafc;}
+.temporaryPasswordGuide strong{display:block;margin-bottom:8px;font-size:14px;}
+.temporaryPasswordGuide ol{margin:0;padding-left:20px;color:#526174;font-size:13px;line-height:1.65;}
+.employeePasswordModal{width:min(620px,calc(100vw - 32px))!important;}
+.employeePasswordBody{display:block!important;}
+.employeePasswordBody>section{width:100%;box-sizing:border-box;}
 .temporaryPasswordResult{
   display:grid;
   gap:10px;
