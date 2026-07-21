@@ -11,6 +11,7 @@ import {
   subscribeNetworkMutationSuccess
 } from './networkMutation.js';
 import { createAsyncQueryCache } from './asyncQueryCache.js';
+import { loadPagedRows } from './pagedRows.js';
 import {
   accrualHistoryRows,
   findHolidayAccrualDraft,
@@ -39,7 +40,7 @@ import {
   prepareFreepassBulkAdjustment
 } from './freepassBulkAdjustment.js';
 
-const APP_BUILD_VERSION = 'V29.58';
+const APP_BUILD_VERSION = 'V29.59';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -65,24 +66,18 @@ supabase.auth.onAuthStateChange((_event, session) => {
 
 async function fetchAllRowsUncached(tableName, selectText = '*', orderColumn = null) {
   const pageSize = 1000;
-  let from = 0;
-  let allRows = [];
-
-  while (true) {
-    const { data } = await runNetworkRead(() => {
-      let query = supabase.from(tableName).select(selectText).range(from, from + pageSize - 1);
+  return loadPagedRows({
+    pageSize,
+    concurrency: 4,
+    loadPage: (from, to, { includeCount }) => runNetworkRead(() => {
+      let query = supabase
+        .from(tableName)
+        .select(selectText, includeCount ? { count: 'exact' } : undefined)
+        .range(from, to);
       if (orderColumn) query = query.order(orderColumn, { ascending: true });
       return query;
-    });
-
-    const rows = data || [];
-    allRows = allRows.concat(rows);
-
-    if (rows.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return allRows;
+    })
+  });
 }
 
 async function fetchAllRows(tableName, selectText = '*', orderColumn = null) {
@@ -3851,22 +3846,26 @@ function Dashboard({ user }) {
 
   async function load() {
     try {
-      let allTargets;
-      if (user?.role === '점장') {
-        const { data } = await runNetworkRead(() => supabase
-          .from('happycall_targets')
-          .select(HAPPY_CALL_TARGET_LIST_COLUMNS)
-          .eq('assigned_store', user.store_name)
-          .order('target_date', { ascending: true }));
-        allTargets = data || [];
-      } else {
-        allTargets = await fetchAllRows('happycall_targets', HAPPY_CALL_TARGET_LIST_COLUMNS, 'target_date');
+      if (user?.role !== '점장') {
+        const [allTargets, allLogs] = await Promise.all([
+          fetchAllRows('happycall_targets', HAPPY_CALL_TARGET_LIST_COLUMNS, 'target_date'),
+          fetchAllRows('happycall_logs', HAPPY_CALL_LOG_LIST_COLUMNS, 'checked_at')
+        ]);
+        setTargets((allTargets || []).filter(isVisibleHappycallTarget));
+        setLogs(allLogs || []);
+        return;
       }
+
+      let allTargets;
+      const { data } = await runNetworkRead(() => supabase
+        .from('happycall_targets')
+        .select(HAPPY_CALL_TARGET_LIST_COLUMNS)
+        .eq('assigned_store', user.store_name)
+        .order('target_date', { ascending: true }));
+      allTargets = data || [];
       let visible = (allTargets || []).filter(isVisibleHappycallTarget);
-      if (user?.role === '점장') visible = visible.filter(t => t.assigned_store === user.store_name);
-      const allLogs = user?.role === '점장'
-        ? await fetchRowsByValues('happycall_logs', 'target_id', visible.map(t => t.id), HAPPY_CALL_LOG_LIST_COLUMNS)
-        : await fetchAllRows('happycall_logs', HAPPY_CALL_LOG_LIST_COLUMNS, 'checked_at');
+      visible = visible.filter(t => t.assigned_store === user.store_name);
+      const allLogs = await fetchRowsByValues('happycall_logs', 'target_id', visible.map(t => t.id), HAPPY_CALL_LOG_LIST_COLUMNS);
       setTargets(visible);
       setLogs(allLogs || []);
     } catch (e) {
@@ -3940,6 +3939,20 @@ function CallList({ user, mode, readOnly = false }) {
   async function load() {
     setLoading(true);
     try {
+      if (mode === 'all') {
+        const [allTargets, allLogs, customers] = await Promise.all([
+          fetchAllRows('happycall_targets', HAPPY_CALL_TARGET_LIST_COLUMNS, 'target_date'),
+          fetchAllRows('happycall_logs', HAPPY_CALL_LOG_LIST_COLUMNS, 'checked_at'),
+          fetchAllRows('customers', CUSTOMER_DISPLAY_COLUMNS, 'open_date')
+        ]);
+        const visible = (allTargets || []).filter(isVisibleHappycallTarget);
+        setCustomersByJoinNo(Object.fromEntries((customers || []).map(c => [c.join_no, c])));
+        setTargets(visible);
+        setLogs(allLogs || []);
+        setPage(1);
+        return;
+      }
+
       let allTargets;
       if (mode === 'mine') {
         const { data } = await runNetworkRead(() => supabase
@@ -3968,12 +3981,10 @@ function CallList({ user, mode, readOnly = false }) {
       if (mode === 'store') visible = visible.filter(t => t.assigned_store === user.store_name);
       const targetIds = visible.map(t => t.id);
       const joinNos = visible.map(t => t.join_no);
-      const allLogs = mode === 'all'
-        ? await fetchAllRows('happycall_logs', HAPPY_CALL_LOG_LIST_COLUMNS, 'checked_at')
-        : await fetchRowsByValues('happycall_logs', 'target_id', targetIds, HAPPY_CALL_LOG_LIST_COLUMNS);
-      const customers = mode === 'all'
-        ? await fetchAllRows('customers', CUSTOMER_DISPLAY_COLUMNS, 'open_date')
-        : await fetchRowsByValues('customers', 'join_no', joinNos, CUSTOMER_DISPLAY_COLUMNS, 250);
+      const [allLogs, customers] = await Promise.all([
+        fetchRowsByValues('happycall_logs', 'target_id', targetIds, HAPPY_CALL_LOG_LIST_COLUMNS),
+        fetchRowsByValues('customers', 'join_no', joinNos, CUSTOMER_DISPLAY_COLUMNS, 250)
+      ]);
       setCustomersByJoinNo(Object.fromEntries((customers || []).map(c => [c.join_no, c])));
       setTargets(visible);
       setLogs(allLogs || []);
@@ -5846,24 +5857,28 @@ function EmployeePerformanceDashboard({ user, mode = 'all' }) {
   async function load() {
     setLoading(true);
     try {
-      let allTargets;
-      if (mode === 'store') {
-        const { data } = await runNetworkRead(() => supabase
-          .from('happycall_targets')
-          .select(HAPPY_CALL_TARGET_LIST_COLUMNS)
-          .eq('assigned_store', user.store_name)
-          .order('target_date', { ascending: true }));
-        allTargets = data || [];
-      } else {
-        allTargets = await fetchAllRows('happycall_targets', HAPPY_CALL_TARGET_LIST_COLUMNS, 'target_date');
+      if (mode !== 'store') {
+        const [allTargets, allLogs] = await Promise.all([
+          fetchAllRows('happycall_targets', HAPPY_CALL_TARGET_LIST_COLUMNS, 'target_date'),
+          fetchAllRows('happycall_logs', HAPPY_CALL_LOG_LIST_COLUMNS, 'checked_at')
+        ]);
+        setTargets((allTargets || []).filter(isVisibleHappycallTarget));
+        setLogs(allLogs || []);
+        return;
       }
 
-      let visible = (allTargets || []).filter(isVisibleHappycallTarget);
-      if (mode === 'store') visible = visible.filter(t => t.assigned_store === user.store_name);
+      let allTargets;
+      const { data } = await runNetworkRead(() => supabase
+        .from('happycall_targets')
+        .select(HAPPY_CALL_TARGET_LIST_COLUMNS)
+        .eq('assigned_store', user.store_name)
+        .order('target_date', { ascending: true }));
+      allTargets = data || [];
 
-      const allLogs = mode === 'store'
-        ? await fetchRowsByValues('happycall_logs', 'target_id', visible.map(t => t.id), HAPPY_CALL_LOG_LIST_COLUMNS)
-        : await fetchAllRows('happycall_logs', HAPPY_CALL_LOG_LIST_COLUMNS, 'checked_at');
+      let visible = (allTargets || []).filter(isVisibleHappycallTarget);
+      visible = visible.filter(t => t.assigned_store === user.store_name);
+
+      const allLogs = await fetchRowsByValues('happycall_logs', 'target_id', visible.map(t => t.id), HAPPY_CALL_LOG_LIST_COLUMNS);
       setTargets(visible);
       setLogs(allLogs || []);
     } catch (e) {
@@ -6635,6 +6650,19 @@ function ReviewDashboard({ user }) {
   async function load() {
     setLoading(true);
     try {
+      if (user.role !== '검수자') {
+        const [allTargets, allLogs, customers] = await Promise.all([
+          fetchAllRows('happycall_targets', HAPPY_CALL_TARGET_LIST_COLUMNS, 'target_date'),
+          fetchAllRows('happycall_logs', HAPPY_CALL_LOG_LIST_COLUMNS, 'checked_at'),
+          fetchAllRows('customers', CUSTOMER_DISPLAY_COLUMNS, 'open_date')
+        ]);
+        setCustomersByJoinNo(Object.fromEntries((customers || []).map(c => [c.join_no, c])));
+        setTargets((allTargets || []).filter(isVisibleHappycallTarget));
+        setLogs(allLogs || []);
+        setPage(1);
+        return;
+      }
+
       let allowedStores = null;
       if (user.role === '검수자') {
         const { data: permissions } = await runNetworkRead(() => supabase
