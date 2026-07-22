@@ -9938,6 +9938,12 @@ body.modal-open{
   touch-action:none !important;
 }
 
+/* A modal rendered inside main must not be trapped below the sticky header/nav. */
+html.modal-open main,
+body.modal-open main{
+  z-index:auto !important;
+}
+
 .modalBg{
   position:fixed !important;
   inset:0 !important;
