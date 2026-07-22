@@ -42,7 +42,7 @@ import {
   prepareFreepassBulkAdjustment
 } from './freepassBulkAdjustment.js';
 
-const APP_BUILD_VERSION = 'V29.61';
+const APP_BUILD_VERSION = 'V29.62';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -5121,7 +5121,7 @@ function EmployeeDetailModal({ employee, stores, user, onClose, onUpdated, onOpe
     onUpdated?.();
   }
 
-  return (
+  return createPortal((
     <div className="modalBg employeeDetailModalBg">
       <div className="modal employeeDetailModal">
         <div className="modalHead"><h2>{employee.name} 상세관리</h2><button onClick={onClose}>닫기</button></div>
@@ -5150,7 +5150,7 @@ function EmployeeDetailModal({ employee, stores, user, onClose, onUpdated, onOpe
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }
 
 function WorkHistoryInner({ employee, stores, user }) {
