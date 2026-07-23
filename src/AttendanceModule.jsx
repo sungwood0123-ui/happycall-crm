@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FEATURE_DEFINITIONS } from './featureAccess.js';
 
 async function invokeAttendance(supabase, body) {
@@ -37,6 +37,131 @@ function getLocation() {
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
     );
   });
+}
+
+const KAKAO_MAP_APP_KEY = String(import.meta.env.VITE_KAKAO_MAP_APP_KEY || '').trim();
+let kakaoMapsPromise;
+
+function loadKakaoMaps() {
+  if (!KAKAO_MAP_APP_KEY) return Promise.reject(new Error('지도 연결 키가 필요합니다.'));
+  if (window.kakao?.maps?.services) return Promise.resolve(window.kakao);
+  if (kakaoMapsPromise) return kakaoMapsPromise;
+  kakaoMapsPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-sechan-kakao-map]');
+    const ready = () => window.kakao?.maps?.load(() => resolve(window.kakao));
+    if (existing) {
+      existing.addEventListener('load', ready, { once: true });
+      existing.addEventListener('error', () => reject(new Error('지도를 불러오지 못했습니다.')), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.dataset.sechanKakaoMap = 'true';
+    script.async = true;
+    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(KAKAO_MAP_APP_KEY)}&autoload=false&libraries=services`;
+    script.onload = ready;
+    script.onerror = () => reject(new Error('지도를 불러오지 못했습니다.'));
+    document.head.appendChild(script);
+  });
+  return kakaoMapsPromise;
+}
+
+function AttendanceLocationPicker({ value, onChange, onMessage }) {
+  const mapContainerRef = useRef(null);
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+  const geocoderRef = useRef(null);
+  const [addressInput, setAddressInput] = useState(value.address || '');
+  const [mapReady, setMapReady] = useState(false);
+
+  useEffect(() => { setAddressInput(value.address || ''); }, [value.address]);
+
+  useEffect(() => {
+    if (!KAKAO_MAP_APP_KEY || !mapContainerRef.current) return;
+    let active = true;
+    loadKakaoMaps().then(kakao => {
+      if (!active || !mapContainerRef.current) return;
+      const latitude = Number(value.latitude) || 37.566826;
+      const longitude = Number(value.longitude) || 126.9786567;
+      const center = new kakao.maps.LatLng(latitude, longitude);
+      const map = new kakao.maps.Map(mapContainerRef.current, { center, level: Number(value.latitude) ? 3 : 8 });
+      const marker = new kakao.maps.Marker({ map, position: center });
+      const geocoder = new kakao.maps.services.Geocoder();
+      kakao.maps.event.addListener(map, 'click', mouseEvent => {
+        const position = mouseEvent.latLng;
+        marker.setPosition(position);
+        geocoder.coord2Address(position.getLng(), position.getLat(), result => {
+          const address = result?.[0]?.road_address?.address_name || result?.[0]?.address?.address_name || '';
+          onChange({
+            latitude: position.getLat().toFixed(7),
+            longitude: position.getLng().toFixed(7),
+            address
+          });
+        });
+      });
+      mapRef.current = map;
+      markerRef.current = marker;
+      geocoderRef.current = geocoder;
+      setMapReady(true);
+    }).catch(error => onMessage(error.message));
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !markerRef.current || !window.kakao?.maps) return;
+    const latitude = Number(value.latitude);
+    const longitude = Number(value.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+    const position = new window.kakao.maps.LatLng(latitude, longitude);
+    markerRef.current.setPosition(position);
+    mapRef.current.setCenter(position);
+  }, [mapReady, value.latitude, value.longitude]);
+
+  function findAddress() {
+    const address = addressInput.trim();
+    if (!address) return onMessage('검색할 주소를 입력해주세요.');
+    if (!geocoderRef.current) return onMessage('지도 연결 키를 설정한 뒤 주소 검색을 사용할 수 있습니다.');
+    geocoderRef.current.addressSearch(address, (result, status) => {
+      if (status !== window.kakao.maps.services.Status.OK || !result?.[0]) return onMessage('주소를 찾지 못했습니다. 도로명 주소로 다시 검색해주세요.');
+      const latitude = Number(result[0].y).toFixed(7);
+      const longitude = Number(result[0].x).toFixed(7);
+      onChange({ latitude, longitude, address: result[0].road_address?.address_name || result[0].address_name || address });
+      onMessage('주소 위치를 찾았습니다. 지도와 허용 반경을 확인한 뒤 저장해주세요.');
+    });
+  }
+
+  async function useCurrentLocation() {
+    const location = await getLocation();
+    if (location.latitude == null) return onMessage('현재 위치를 확인할 수 없습니다. 브라우저 위치 권한을 허용해주세요.');
+    const latitude = location.latitude.toFixed(7);
+    const longitude = location.longitude.toFixed(7);
+    if (geocoderRef.current) {
+      geocoderRef.current.coord2Address(Number(longitude), Number(latitude), result => {
+        const address = result?.[0]?.road_address?.address_name || result?.[0]?.address?.address_name || '';
+        onChange({ latitude, longitude, address });
+      });
+    } else {
+      onChange({ latitude, longitude });
+    }
+    onMessage('현재 위치를 입력했습니다. 위치와 허용 반경을 확인한 뒤 저장해주세요.');
+  }
+
+  return <div className="attendanceLocationPicker full">
+    <div className="attendanceAddressRow">
+      <label>매장 주소<input value={addressInput} onChange={event => setAddressInput(event.target.value)} placeholder="예: 경기도 파주시 금촌동 중앙로 00" /></label>
+      <button type="button" className="attendanceSecondary" onClick={findAddress}>주소 찾기</button>
+      <button type="button" className="attendanceSecondary" onClick={useCurrentLocation}>현재 위치로 지정</button>
+    </div>
+    {KAKAO_MAP_APP_KEY
+      ? <><div ref={mapContainerRef} className="attendanceMap" aria-label="출근 위치 지도" /><p className="attendanceMapHelp">지도를 눌러 정확한 출근 위치를 지정할 수 있습니다.</p></>
+      : <div className="attendanceMapUnavailable">지도 연결 키를 등록하면 주소 검색과 지도 선택이 활성화됩니다. 현재 위치 지정은 지금도 사용할 수 있습니다.</div>}
+    <details className="attendanceCoordinateDetails">
+      <summary>좌표 직접 확인·수정</summary>
+      <div>
+        <label>위도<input type="number" step="0.0000001" value={value.latitude} onChange={event => onChange({ latitude: event.target.value })} /></label>
+        <label>경도<input type="number" step="0.0000001" value={value.longitude} onChange={event => onChange({ longitude: event.target.value })} /></label>
+      </div>
+    </details>
+  </div>;
 }
 
 export default function AttendanceModule({ supabase, user, superAdmin = false }) {
@@ -199,29 +324,82 @@ export default function AttendanceModule({ supabase, user, superAdmin = false })
 
 export function FeatureAccessManager({ supabase }) {
   const [data, setData] = useState(null);
-  const [scope, setScope] = useState('employee');
-  const [target, setTarget] = useState('');
+  const [draft, setDraft] = useState({});
+  const [savedDraft, setSavedDraft] = useState({});
+  const [selected, setSelected] = useState([]);
+  const [search, setSearch] = useState('');
+  const [storeFilter, setStoreFilter] = useState('all');
+  const [roleFilter, setRoleFilter] = useState('all');
+  const [bulkFeature, setBulkFeature] = useState('attendance');
+  const [bulkMode, setBulkMode] = useState('enabled');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
   async function load() {
-    try { setData(await invokeAttendance(supabase, { action: 'admin-data' })); }
+    try {
+      const nextData = await invokeAttendance(supabase, { action: 'admin-data' });
+      const nextDraft = {};
+      for (const employee of nextData.employees || []) {
+        nextDraft[employee.id] = {};
+        for (const feature of FEATURE_DEFINITIONS) {
+          const row = (nextData.overrides || []).find(item =>
+            item.scope_type === 'employee' && item.employee_id === employee.id && item.feature_key === feature.key
+          );
+          nextDraft[employee.id][feature.key] = row ? (row.enabled ? 'enabled' : 'disabled') : 'inherit';
+        }
+      }
+      setData(nextData);
+      setDraft(nextDraft);
+      setSavedDraft(JSON.parse(JSON.stringify(nextDraft)));
+      setSelected(previous => previous.filter(id => nextData.employees?.some(employee => employee.id === id)));
+    }
     catch (error) { setMessage(error.message); }
   }
   useEffect(() => { load(); }, []);
-  const targets = scope === 'employee' ? (data?.employees || []) : (data?.stores || []);
-  useEffect(() => { if (!targets.some(item => item.id === target)) setTarget(targets[0]?.id || ''); }, [scope, data]);
 
-  function modeFor(featureKey) {
-    const row = (data?.overrides || []).find(item => item.scope_type === scope && item.feature_key === featureKey && item[scope === 'employee' ? 'employee_id' : 'store_id'] === target);
-    return row ? (row.enabled ? 'enabled' : 'disabled') : 'inherit';
+  const stores = useMemo(() => [...new Set((data?.employees || []).map(employee => employee.store_name).filter(Boolean))].sort(), [data]);
+  const roles = useMemo(() => [...new Set((data?.employees || []).map(employee => employee.role).filter(Boolean))].sort(), [data]);
+  const filteredEmployees = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    return (data?.employees || []).filter(employee =>
+      (storeFilter === 'all' || employee.store_name === storeFilter) &&
+      (roleFilter === 'all' || employee.role === roleFilter) &&
+      (!keyword || `${employee.name} ${employee.store_name} ${employee.role}`.toLowerCase().includes(keyword))
+    );
+  }, [data, search, storeFilter, roleFilter]);
+  const changed = useMemo(() => Object.keys(draft).flatMap(employeeId =>
+    FEATURE_DEFINITIONS.filter(feature => draft[employeeId]?.[feature.key] !== savedDraft[employeeId]?.[feature.key])
+      .map(feature => ({ target_id: employeeId, feature_key: feature.key, mode: draft[employeeId][feature.key] }))
+  ), [draft, savedDraft]);
+  const visibleIds = filteredEmployees.map(employee => employee.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selected.includes(id));
+
+  function setMode(employeeId, featureKey, mode) {
+    setDraft(previous => ({ ...previous, [employeeId]: { ...previous[employeeId], [featureKey]: mode } }));
   }
 
-  async function save(featureKey, mode) {
+  function toggleVisibleSelection() {
+    setSelected(previous => allVisibleSelected
+      ? previous.filter(id => !visibleIds.includes(id))
+      : [...new Set([...previous, ...visibleIds])]);
+  }
+
+  function applyBulk() {
+    if (!selected.length) return setMessage('먼저 직원을 선택해주세요.');
+    setDraft(previous => {
+      const next = { ...previous };
+      for (const employeeId of selected) next[employeeId] = { ...next[employeeId], [bulkFeature]: bulkMode };
+      return next;
+    });
+    setMessage(`${selected.length}명의 ${FEATURE_DEFINITIONS.find(item => item.key === bulkFeature)?.label} 설정을 변경했습니다. 아래 저장 버튼을 눌러 최종 반영해주세요.`);
+  }
+
+  async function saveAll() {
+    if (!changed.length) return setMessage('저장할 변경사항이 없습니다.');
     setBusy(true); setMessage('');
     try {
-      await invokeAttendance(supabase, { action: 'save-feature-override', scope_type: scope, target_id: target, feature_key: featureKey, mode });
-      setMessage('기능 사용 권한을 저장했습니다.');
+      await invokeAttendance(supabase, { action: 'save-feature-overrides', changes: changed });
+      setMessage(`${changed.length}개의 기능 사용 권한을 저장했습니다.`);
       await load();
     } catch (error) { setMessage(error.message); }
     finally { setBusy(false); }
@@ -233,12 +411,38 @@ export function FeatureAccessManager({ supabase }) {
       <div><p className="attendanceEyebrow">최고관리자 전용</p><h2>기능 사용 권한</h2></div>
     </div>
     <div className="attendancePanel">
-    <h3>직원별·매장별 기능 설정</h3>
-    <p className="attendanceHelp">직원별 설정이 매장별 설정보다 우선합니다. 기존 역할 권한을 높이지 않고, 선택한 기능의 사용 여부만 제한합니다.</p>
+    <h3>직원별 기능 설정</h3>
+    <p className="attendanceHelp">직원관리 목록처럼 한 화면에서 검색·선택하고 여러 직원의 기능을 한꺼번에 설정할 수 있습니다. 기존 역할 권한을 높이지 않고 선택한 기능의 사용 여부만 제한합니다.</p>
     {message && <div className="attendanceMessage">{message}</div>}
-    <div className="accessScopeTabs"><button className={scope === 'employee' ? 'active' : ''} onClick={() => setScope('employee')}>직원별</button><button className={scope === 'store' ? 'active' : ''} onClick={() => setScope('store')}>매장별</button></div>
-    <label className="accessTarget">{scope === 'employee' ? '직원 선택' : '매장 선택'}<select value={target} onChange={event => setTarget(event.target.value)}>{targets.map(item => <option key={item.id} value={item.id}>{scope === 'employee' ? `${item.store_name} · ${item.name} · ${item.role}` : item.name}</option>)}</select></label>
-    <div className="featureAccessGrid">{FEATURE_DEFINITIONS.map(feature => <article key={feature.key}><div><strong>{feature.label}</strong><span>시스템 기본: {feature.defaultEnabled ? '사용' : '미사용'}</span></div><select value={modeFor(feature.key)} disabled={busy || !target} onChange={event => save(feature.key, event.target.value)}><option value="inherit">상위 설정 따름</option><option value="enabled">사용</option><option value="disabled">미사용</option></select></article>)}</div>
+    <div className="featureAccessToolbar">
+      <input aria-label="직원 검색" value={search} onChange={event => setSearch(event.target.value)} placeholder="직원명·매장·직책 검색" />
+      <select aria-label="매장 필터" value={storeFilter} onChange={event => setStoreFilter(event.target.value)}><option value="all">전체 매장</option>{stores.map(store => <option key={store}>{store}</option>)}</select>
+      <select aria-label="직책 필터" value={roleFilter} onChange={event => setRoleFilter(event.target.value)}><option value="all">전체 직책</option>{roles.map(role => <option key={role}>{role}</option>)}</select>
+    </div>
+    <div className="featureBulkBar">
+      <strong>{selected.length}명 선택</strong>
+      <select aria-label="일괄 적용 기능" value={bulkFeature} onChange={event => setBulkFeature(event.target.value)}>{FEATURE_DEFINITIONS.map(feature => <option key={feature.key} value={feature.key}>{feature.label}</option>)}</select>
+      <select aria-label="일괄 적용 상태" value={bulkMode} onChange={event => setBulkMode(event.target.value)}><option value="enabled">사용</option><option value="disabled">미사용</option><option value="inherit">기본값</option></select>
+      <button type="button" className="attendanceSecondary" onClick={applyBulk} disabled={busy}>선택 직원 일괄 적용</button>
+    </div>
+    <div className="featureAccessTable attendanceDesktopTable">
+      <table>
+        <thead><tr><th><input type="checkbox" aria-label="현재 목록 전체 선택" checked={allVisibleSelected} onChange={toggleVisibleSelection} /></th><th>직원</th><th>소속·직책</th>{FEATURE_DEFINITIONS.map(feature => <th key={feature.key}>{feature.label}</th>)}</tr></thead>
+        <tbody>{filteredEmployees.map(employee => <tr key={employee.id}>
+          <td><input type="checkbox" aria-label={`${employee.name} 선택`} checked={selected.includes(employee.id)} onChange={() => setSelected(previous => previous.includes(employee.id) ? previous.filter(id => id !== employee.id) : [...previous, employee.id])} /></td>
+          <td><strong>{employee.name}</strong></td><td>{employee.store_name} · {employee.role}</td>
+          {FEATURE_DEFINITIONS.map(feature => <td key={feature.key}><select aria-label={`${employee.name} ${feature.label}`} value={draft[employee.id]?.[feature.key] || 'inherit'} onChange={event => setMode(employee.id, feature.key, event.target.value)}><option value="inherit">기본값</option><option value="enabled">사용</option><option value="disabled">미사용</option></select></td>)}
+        </tr>)}</tbody>
+      </table>
+    </div>
+    <div className="featureAccessMobileList">
+      {filteredEmployees.map(employee => <article key={employee.id}>
+        <header><label><input type="checkbox" checked={selected.includes(employee.id)} onChange={() => setSelected(previous => previous.includes(employee.id) ? previous.filter(id => id !== employee.id) : [...previous, employee.id])} /><span><strong>{employee.name}</strong><small>{employee.store_name} · {employee.role}</small></span></label></header>
+        <div>{FEATURE_DEFINITIONS.map(feature => <label key={feature.key}><span>{feature.label}</span><select value={draft[employee.id]?.[feature.key] || 'inherit'} onChange={event => setMode(employee.id, feature.key, event.target.value)}><option value="inherit">기본값</option><option value="enabled">사용</option><option value="disabled">미사용</option></select></label>)}</div>
+      </article>)}
+    </div>
+    {!filteredEmployees.length && <EmptyState>조건에 맞는 직원이 없습니다.</EmptyState>}
+    <div className="featureAccessSaveBar"><span>변경사항 {changed.length}개</span><button type="button" className="attendancePrimary" onClick={saveAll} disabled={busy || !changed.length}>{busy ? '저장 중' : '전체 변경사항 저장'}</button></div>
     </div>
   </section>;
 }
@@ -246,7 +450,7 @@ export function FeatureAccessManager({ supabase }) {
 function StoreAttendanceSettings({ supabase }) {
   const [data, setData] = useState(null);
   const [storeId, setStoreId] = useState('');
-  const [form, setForm] = useState({ enabled: false, auth_mode: 'either', latitude: '', longitude: '', radius_meters: 100, default_start_time: '', ips: '' });
+  const [form, setForm] = useState({ enabled: false, auth_mode: 'either', address: '', latitude: '', longitude: '', radius_meters: 100, default_start_time: '', ips: '' });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -261,15 +465,8 @@ function StoreAttendanceSettings({ supabase }) {
     setStoreId(nextId);
     const setting = (data.settings || []).find(item => item.store_id === nextId) || {};
     const ips = (data.ips || []).filter(item => item.store_id === nextId).map(item => item.ip_address).join('\n');
-    setForm({ enabled: Boolean(setting.enabled), auth_mode: setting.auth_mode || 'either', latitude: setting.latitude ?? '', longitude: setting.longitude ?? '', radius_meters: setting.radius_meters || 100, default_start_time: setting.default_start_time || '', ips });
+    setForm({ enabled: Boolean(setting.enabled), auth_mode: setting.auth_mode || 'either', address: setting.address || '', latitude: setting.latitude ?? '', longitude: setting.longitude ?? '', radius_meters: setting.radius_meters || 100, default_start_time: setting.default_start_time || '', ips });
   }, [data, storeId]);
-
-  async function useCurrentLocation() {
-    const location = await getLocation();
-    if (location.latitude == null) return setMessage('현재 위치를 확인할 수 없습니다. 브라우저 위치 권한을 허용해주세요.');
-    setForm(previous => ({ ...previous, latitude: location.latitude.toFixed(7), longitude: location.longitude.toFixed(7) }));
-    setMessage('현재 위치를 입력했습니다. 저장 버튼을 눌러주세요.');
-  }
 
   async function save(event) {
     event.preventDefault(); setBusy(true); setMessage('');
@@ -282,18 +479,16 @@ function StoreAttendanceSettings({ supabase }) {
 
   if (!data) return <LoadingState />;
   return <div className="attendancePanel">
-    <h3>매장 출근 설정</h3>
-    <p className="attendanceHelp">WiFi 또는 GPS 중 하나가 확인되면 출근할 수 있도록 설정하는 방식을 권장합니다.</p>
+    <h3>매장·사무실 출근 설정</h3>
+    <p className="attendanceHelp">매장과 사무실의 주소 또는 지도 위치와 WiFi를 등록합니다. WiFi 또는 GPS 중 하나가 확인되면 출근할 수 있도록 설정하는 방식을 권장합니다.</p>
     {message && <div className="attendanceMessage">{message}</div>}
     <form className="storeAttendanceForm" onSubmit={save}>
       <label>매장<select value={storeId} onChange={event => setStoreId(event.target.value)}>{(data.stores || []).map(store => <option key={store.id} value={store.id}>{store.name}</option>)}</select></label>
       <label className="toggleLabel"><input type="checkbox" checked={form.enabled} onChange={event => setForm({ ...form, enabled: event.target.checked })} /> 출근 기능 활성화</label>
       <label>확인 방식<select value={form.auth_mode} onChange={event => setForm({ ...form, auth_mode: event.target.value })}><option value="either">WiFi 또는 GPS</option><option value="wifi">WiFi만</option><option value="gps">GPS만</option></select></label>
       <label>기본 출근시간<input type="time" value={form.default_start_time} onChange={event => setForm({ ...form, default_start_time: event.target.value })} /></label>
-      <label>위도<input type="number" step="0.0000001" value={form.latitude} onChange={event => setForm({ ...form, latitude: event.target.value })} /></label>
-      <label>경도<input type="number" step="0.0000001" value={form.longitude} onChange={event => setForm({ ...form, longitude: event.target.value })} /></label>
-      <label>허용 반경(m)<input type="number" min="30" max="1000" value={form.radius_meters} onChange={event => setForm({ ...form, radius_meters: event.target.value })} /></label>
-      <button type="button" className="attendanceSecondary" onClick={useCurrentLocation}>현재 위치 입력</button>
+      <AttendanceLocationPicker value={form} onMessage={setMessage} onChange={changes => setForm(previous => ({ ...previous, ...changes }))} />
+      <label className="full">GPS 허용 반경(m)<input type="number" min="30" max="1000" value={form.radius_meters} onChange={event => setForm({ ...form, radius_meters: event.target.value })} /></label>
       <label className="full">매장 WiFi 공인 IP<textarea value={form.ips} onChange={event => setForm({ ...form, ips: event.target.value })} placeholder="IP가 여러 개면 줄을 바꿔 입력해주세요." /></label>
       {data.current_ip && <button type="button" className="attendanceSecondary full" onClick={() => setForm({ ...form, ips: [...new Set([...form.ips.split(/[,\n]/).map(value => value.trim()).filter(Boolean), data.current_ip])].join('\n') })}>현재 접속 IP 추가: {data.current_ip}</button>}
       <button type="submit" className="attendancePrimary full" disabled={busy}>매장 설정 저장</button>
