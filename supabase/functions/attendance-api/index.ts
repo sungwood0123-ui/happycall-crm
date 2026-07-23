@@ -439,12 +439,55 @@ async function saveFeatureOverride(actor: Employee, payload: Record<string, unkn
   return json(200, { completed: true });
 }
 
+async function saveFeatureOverrides(actor: Employee, payload: Record<string, unknown>) {
+  if (!isSuperAdmin(actor)) return json(403, { error: '최고관리자만 사용할 수 있습니다.' });
+  const changes = Array.isArray(payload.changes) ? payload.changes : [];
+  if (!changes.length || changes.length > 200) return json(400, { error: '저장할 권한 변경사항을 확인해주세요.' });
+  const featureKeys = ['happycall', 'freepass', 'accessories', 'attendance'];
+  const modes = ['inherit', 'enabled', 'disabled'];
+  for (const change of changes) {
+    const targetId = String(change?.target_id || '');
+    const featureKey = String(change?.feature_key || '');
+    const mode = String(change?.mode || '');
+    if (!targetId || !featureKeys.includes(featureKey) || !modes.includes(mode)) {
+      return json(400, { error: '권한 설정값을 확인해주세요.' });
+    }
+  }
+  const targetIds = [...new Set(changes.map(change => String(change.target_id)))];
+  const { data: employees, error: employeeError } = await service.from('employees')
+    .select('id').in('id', targetIds).eq('status', '재직');
+  if (employeeError) throw employeeError;
+  if ((employees || []).length !== targetIds.length) return json(400, { error: '재직 중인 직원만 설정할 수 있습니다.' });
+
+  for (const change of changes) {
+    const targetId = String(change.target_id);
+    const featureKey = String(change.feature_key);
+    const mode = String(change.mode);
+    const { error: deleteError } = await service.from('feature_access_overrides').delete()
+      .eq('scope_type', 'employee').eq('feature_key', featureKey).eq('employee_id', targetId);
+    if (deleteError) throw deleteError;
+    if (mode !== 'inherit') {
+      const { error } = await service.from('feature_access_overrides').insert({
+        scope_type: 'employee', employee_id: targetId, feature_key: featureKey,
+        enabled: mode === 'enabled', updated_by: actor.id, updated_at: new Date().toISOString()
+      });
+      if (error) throw error;
+    }
+  }
+  await service.from('audit_logs').insert({
+    action: '기능사용권한일괄변경', target_type: 'employee', target_id: actor.id,
+    actor_name: actor.name, detail: `${targetIds.length}명 / ${changes.length}개 설정`
+  });
+  return json(200, { completed: true, changed: changes.length });
+}
+
 async function saveStoreSetting(actor: Employee, payload: Record<string, unknown>) {
   if (!isSuperAdmin(actor)) return json(403, { error: '최고관리자만 사용할 수 있습니다.' });
   const storeId = String(payload.store_id || '');
-  const row = {
-    store_id: storeId, enabled: Boolean(payload.enabled), auth_mode: String(payload.auth_mode || 'either'),
-    latitude: payload.latitude === '' || payload.latitude == null ? null : Number(payload.latitude),
+    const row = {
+      store_id: storeId, enabled: Boolean(payload.enabled), auth_mode: String(payload.auth_mode || 'either'),
+      address: String(payload.address || '').trim() || null,
+      latitude: payload.latitude === '' || payload.latitude == null ? null : Number(payload.latitude),
     longitude: payload.longitude === '' || payload.longitude == null ? null : Number(payload.longitude),
     radius_meters: Math.round(Number(payload.radius_meters || 100)),
     default_start_time: payload.default_start_time || null, updated_by: actor.id, updated_at: new Date().toISOString()
@@ -476,9 +519,10 @@ Deno.serve(async (req) => {
     if (action === 'request-other-store') return await requestOtherStore(actor, payload);
     if (action === 'cancel-request') return await cancelRequest(actor, payload);
     if (action === 'decide-request') return await decideRequest(actor, payload);
-    if (action === 'admin-data') return await adminData(req, actor);
-    if (action === 'save-feature-override') return await saveFeatureOverride(actor, payload);
-    if (action === 'save-store-setting') return await saveStoreSetting(actor, payload);
+      if (action === 'admin-data') return await adminData(req, actor);
+      if (action === 'save-feature-override') return await saveFeatureOverride(actor, payload);
+      if (action === 'save-feature-overrides') return await saveFeatureOverrides(actor, payload);
+      if (action === 'save-store-setting') return await saveStoreSetting(actor, payload);
     return json(400, { error: '요청 내용을 확인해주세요.' });
   } catch (error) {
     console.error('attendance-api failed', error);
