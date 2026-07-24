@@ -53,7 +53,12 @@ function getLocation() {
   });
 }
 
-const KAKAO_MAP_APP_KEY = String(import.meta.env.VITE_KAKAO_MAP_APP_KEY || '').trim();
+// Kakao JavaScript app keys are public browser identifiers. Keep the production
+// key as a fallback so the legacy happycall-crm domain remains functional even
+// when that legacy Vercel project does not inherit the current project's env.
+const KAKAO_MAP_APP_KEY = String(
+  import.meta.env.VITE_KAKAO_MAP_APP_KEY || '396bcfcbdd813d5541db7cae2e0c6fbe'
+).trim();
 let kakaoMapsPromise;
 
 function loadKakaoMaps() {
