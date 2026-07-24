@@ -21,6 +21,7 @@ test('attendance switch remains aligned on mobile without overflowing', () => {
 
 test('Kakao map uses the Vite production environment variable', () => {
   assert.match(attendance, /import\.meta\.env\.VITE_KAKAO_MAP_APP_KEY/);
+  assert.match(attendance, /396bcfcbdd813d5541db7cae2e0c6fbe/);
   assert.match(attendance, /dapi\.kakao\.com\/v2\/maps\/sdk\.js/);
 });
 
