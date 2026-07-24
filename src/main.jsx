@@ -45,7 +45,7 @@ import {
   resolveAllFeatureAccess
 } from './featureAccess.js';
 
-const APP_BUILD_VERSION = 'V29.65';
+const APP_BUILD_VERSION = 'V29.66';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
