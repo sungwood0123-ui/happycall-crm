@@ -10870,8 +10870,48 @@ td > .inlineLoadingState,
 .storeAttendanceForm textarea { min-height: 94px; resize: vertical; }
 .attendanceForm .full,
 .storeAttendanceForm .full { grid-column: 1 / -1; }
-.toggleLabel { min-height: 48px; padding: 0 14px; border: 1px solid #d9dfe8; border-radius: 12px; flex-direction: row !important; align-items: center; }
-.toggleLabel input { width: 20px; min-height: 20px; margin: 0; }
+.attendanceToggleLabel {
+  min-height: 48px;
+  align-self: end;
+  justify-self: end;
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 11px;
+  padding: 0 3px;
+  border: 0;
+  color: #111827;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.storeAttendanceForm .attendanceToggleLabel input {
+  appearance: none;
+  width: 46px;
+  min-width: 46px;
+  height: 26px;
+  min-height: 26px;
+  margin: 0;
+  padding: 3px;
+  border: 0;
+  border-radius: 999px;
+  background: #cbd5e1;
+  cursor: pointer;
+  transition: background .18s ease;
+}
+.storeAttendanceForm .attendanceToggleLabel input::after {
+  content: "";
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .24);
+  transition: transform .18s ease;
+}
+.storeAttendanceForm .attendanceToggleLabel input:checked { background: #2563eb; }
+.storeAttendanceForm .attendanceToggleLabel input:checked::after { transform: translateX(20px); }
+.storeAttendanceForm .attendanceToggleLabel input:focus-visible { outline: 3px solid rgba(37, 99, 235, .25); outline-offset: 2px; }
 .attendanceCards { display: grid; gap: 10px; margin-top: 18px; }
 .attendanceCards article,
 .attendanceMobileList article { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 15px; border: 1px solid #e1e6ed; border-radius: 14px; background: #fbfcfe; }
@@ -10959,6 +10999,7 @@ td > .inlineLoadingState,
   .storeAttendanceForm { grid-template-columns: 1fr; }
   .attendanceForm .full,
   .storeAttendanceForm .full { grid-column: auto; }
+  .attendanceToggleLabel { width: 100%; justify-self: stretch; justify-content: space-between; padding: 8px 2px; }
   .attendanceDesktopTable { display: none; }
   .attendanceMobileList { display: grid; gap: 9px; }
   .attendanceCards article { align-items: stretch; }
