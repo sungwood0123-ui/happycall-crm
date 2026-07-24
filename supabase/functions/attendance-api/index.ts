@@ -41,12 +41,12 @@ function kstParts(now = new Date()) {
 }
 
 function normalize(value: unknown) {
-  return String(value || '').trim().replace(/\s+/g, '').replace(/점$/, '');
+  return String(value || '').trim().replace(/\s+/g, '').replace(/??/, '');
 }
 
 function isDayOff(value: unknown) {
   const normalized = normalize(value);
-  return /^(휴무|후무|유휴\d*|유후\d*|연차\d*|월차\d*|당직휴무|휴가|X)$/i.test(normalized);
+  return /^(?대Т|?꾨Т|?좏쑕\d*|?좏썑\d*|?곗감\d*|?붿감\d*|?뱀쭅?대Т|?닿?|X)$/i.test(normalized);
 }
 
 function clientIp(req: Request) {
@@ -72,12 +72,13 @@ async function actorFromRequest(req: Request): Promise<Employee | null> {
   if (error || !user) return null;
   const { data } = await service.from('employees')
     .select('id,name,store_name,status,role,auth_user_id')
-    .eq('auth_user_id', user.id).eq('status', '재직').maybeSingle();
+    .eq('auth_user_id', user.id).eq('status', '?ъ쭅').maybeSingle();
   return data as Employee | null;
 }
 
-function isSuperAdmin(actor: Employee) { return actor.role === '최고관리자'; }
-function isManager(actor: Employee) { return actor.role === '점장'; }
+function isSuperAdmin(actor: Employee) { return actor.role === '理쒓퀬愿由ъ옄'; }
+function isManager(actor: Employee) { return actor.role === '?먯옣'; }
+function isAdminLike(actor: Employee) { return actor.role === '愿由ъ옄' || isSuperAdmin(actor); }
 
 async function storeByName(name: string): Promise<Store | null> {
   const { data } = await service.from('stores').select('id,name,status').eq('name', name).maybeSingle();
@@ -102,7 +103,7 @@ function base64Url(bytes: Uint8Array) {
 }
 
 async function googleAccessToken() {
-  if (!SHEET_ID || !GOOGLE_EMAIL || !GOOGLE_PRIVATE_KEY) throw new Error('근무표 자동 연동 준비가 완료되지 않았습니다.');
+  if (!SHEET_ID || !GOOGLE_EMAIL || !GOOGLE_PRIVATE_KEY) throw new Error('洹쇰Т???먮룞 ?곕룞 以鍮꾧? ?꾨즺?섏? ?딆븯?듬땲??');
   const now = Math.floor(Date.now() / 1000);
   const header = base64Url(new TextEncoder().encode(JSON.stringify({ alg: 'RS256', typ: 'JWT' })));
   const claim = base64Url(new TextEncoder().encode(JSON.stringify({
@@ -122,13 +123,13 @@ async function googleAccessToken() {
     body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion })
   });
   const payload = await response.json();
-  if (!response.ok || !payload.access_token) throw new Error('근무표 연결 계정을 확인할 수 없습니다.');
+  if (!response.ok || !payload.access_token) throw new Error('洹쇰Т???곌껐 怨꾩젙???뺤씤?????놁뒿?덈떎.');
   return payload.access_token as string;
 }
 
 function sheetCandidates(year: number, month: number) {
   const yy = String(year).slice(-2);
-  return [`${yy}년${month}월`, `${yy}년 ${month}월`];
+  return [`${yy}??{month}??, `${yy}??${month}??];
 }
 
 function columnForDay(day: number) {
@@ -143,7 +144,7 @@ function columnForDay(day: number) {
 }
 
 function sheetColumnFromIndex(indexInBToAk: number) {
-  let number = indexInBToAk + 2; // B:AK 범위의 index 0은 실제 B열이다.
+  let number = indexInBToAk + 2; // B:AK 踰붿쐞??index 0? ?ㅼ젣 B?댁씠??
   let result = '';
   while (number > 0) {
     const remainder = (number - 1) % 26;
@@ -165,7 +166,7 @@ async function readSheetRange(token: string, range: string) {
   const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (response.status === 400 || response.status === 404) return null;
   const payload = await response.json();
-  if (!response.ok) throw new Error('근무표를 읽지 못했습니다.');
+  if (!response.ok) throw new Error('洹쇰Т?쒕? ?쎌? 紐삵뻽?듬땲??');
   return (payload.values || []) as string[][];
 }
 
@@ -183,7 +184,7 @@ async function resolveSchedule(actor: Employee, workDate: string) {
       values.forEach((row, index) => {
         if (normalize(row[0]) === normalize(actor.store_name) && normalize(row[1]) === normalize(actor.name)) matches.push(index + 1);
       });
-      if (matches.length !== 1) throw new Error(matches.length ? '근무표에서 같은 직원이 중복되어 있습니다.' : '근무표에서 본인 이름과 매장을 찾지 못했습니다.');
+      if (matches.length !== 1) throw new Error(matches.length ? '洹쇰Т?쒖뿉??媛숈? 吏곸썝??以묐났?섏뼱 ?덉뒿?덈떎.' : '洹쇰Т?쒖뿉??蹂몄씤 ?대쫫怨?留ㅼ옣??李얠? 紐삵뻽?듬땲??');
       sheetRow = matches[0];
       await service.from('attendance_sheet_employee_mappings').upsert({
         employee_id: actor.id, sheet_name: sheetName, sheet_row: sheetRow,
@@ -192,9 +193,9 @@ async function resolveSchedule(actor: Employee, workDate: string) {
       }, { onConflict: 'employee_id,sheet_name' });
     }
     const row = values[sheetRow - 1] || [];
-    const dateHeader = values[2] || []; // 스프레드시트 3행의 날짜를 실제 기준으로 사용한다.
+    const dateHeader = values[2] || []; // ?ㅽ봽?덈뱶?쒗듃 3?됱쓽 ?좎쭨瑜??ㅼ젣 湲곗??쇰줈 ?ъ슜?쒕떎.
     const dateColumnIndex = dateHeader.findIndex((value, index) => index >= 5 && dayFromSheetHeader(value) === day);
-    if (dateColumnIndex < 0) throw new Error(`근무표 3행에서 ${month}월 ${day}일 열을 찾지 못했습니다.`);
+    if (dateColumnIndex < 0) throw new Error(`洹쇰Т??3?됱뿉??${month}??${day}???댁쓣 李얠? 紐삵뻽?듬땲??`);
     const sourceCell = `${sheetColumnFromIndex(dateColumnIndex)}${sheetRow}`;
     const value = String(row[dateColumnIndex] || '').trim();
     await service.from('attendance_schedule_entries').upsert({
@@ -204,7 +205,7 @@ async function resolveSchedule(actor: Employee, workDate: string) {
     }, { onConflict: 'employee_id,work_date' });
     return { token, sheetName, sheetRow, cell: sourceCell, value, dayOff: isDayOff(value) };
   }
-  throw new Error('해당 월의 근무표 탭을 찾지 못했습니다.');
+  throw new Error('?대떦 ?붿쓽 洹쇰Т????쓣 李얠? 紐삵뻽?듬땲??');
 }
 
 async function writeCheckinToSheet(token: string, sheetName: string, cell: string, checkedInAt: string) {
@@ -215,12 +216,12 @@ async function writeCheckinToSheet(token: string, sheetName: string, cell: strin
     method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ range, majorDimension: 'ROWS', values: [[time]] })
   });
-  if (!response.ok) throw new Error('출근 기록은 저장됐지만 근무표 반영이 지연되고 있습니다.');
+  if (!response.ok) throw new Error('異쒓렐 湲곕줉? ??λ릱吏留?洹쇰Т??諛섏쁺??吏?곕릺怨??덉뒿?덈떎.');
 }
 
 async function effectiveCheckinStores(actor: Employee, workDate: string) {
   const home = await storeByName(actor.store_name);
-  if (!home) throw new Error('직원의 현재 매장을 찾지 못했습니다.');
+  if (!home) throw new Error('吏곸썝???꾩옱 留ㅼ옣??李얠? 紐삵뻽?듬땲??');
   const { data: approved } = await service.from('attendance_other_store_requests')
     .select('*').eq('employee_id', actor.id).eq('work_date', workDate).eq('status', 'approved').maybeSingle();
   const stores: Store[] = [home];
@@ -248,7 +249,7 @@ async function checkVerification(req: Request, stores: Store[], payload: Record<
     const accepted = setting.auth_mode === 'wifi' ? wifiOk : setting.auth_mode === 'gps' ? gpsOk : wifiOk || gpsOk;
     if (accepted) return { store, method: wifiOk ? 'wifi' : 'gps', ip: ip || null, distance, accuracy: gpsOk ? accuracy : null };
   }
-  throw new Error('현재 연결된 WiFi 또는 위치가 출근 가능한 매장과 일치하지 않습니다.');
+  throw new Error('?꾩옱 ?곌껐??WiFi ?먮뒗 ?꾩튂媛 異쒓렐 媛?ν븳 留ㅼ옣怨??쇱튂?섏? ?딆뒿?덈떎.');
 }
 
 async function currentStatus(actor: Employee) {
@@ -263,14 +264,14 @@ async function currentStatus(actor: Employee) {
   let scheduleError = '';
   if (enabled && !record) {
     try { schedule = await resolveSchedule(actor, today); }
-    catch (error) { scheduleError = error instanceof Error ? error.message : '근무표를 확인하지 못했습니다.'; }
+    catch (error) { scheduleError = error instanceof Error ? error.message : '洹쇰Т?쒕? ?뺤씤?섏? 紐삵뻽?듬땲??'; }
   }
-  const { data: stores } = await service.from('stores').select('id,name,status').neq('status', '폐점').order('name');
+  const { data: stores } = await service.from('stores').select('id,name,status').neq('status', '?먯젏').order('name');
   return { enabled, today, record, requests: requests || [], history: history || [], stores: stores || [], schedule: schedule ? { sheetName: schedule.sheetName, cell: schedule.cell, value: schedule.value, dayOff: schedule.dayOff } : null, scheduleError };
 }
 
 async function managerPending(actor: Employee) {
-  if (!isManager(actor) && !isSuperAdmin(actor)) return json(403, { error: '점장 또는 최고관리자만 확인할 수 있습니다.' });
+  if (!isManager(actor) && !isSuperAdmin(actor)) return json(403, { error: '?먯옣 ?먮뒗 理쒓퀬愿由ъ옄留??뺤씤?????덉뒿?덈떎.' });
   let query = service.from('attendance_other_store_requests').select('*').eq('status', 'pending').order('work_date');
   if (!isSuperAdmin(actor)) query = query.eq('home_store_name', actor.store_name).neq('employee_id', actor.id);
   const { data, error } = await query;
@@ -278,14 +279,33 @@ async function managerPending(actor: Employee) {
   return json(200, { requests: data || [] });
 }
 
+async function todayAttendance(actor: Employee) {
+  if (!isAdminLike(actor)) return json(403, { error: '愿由ъ옄 ?먮뒗 理쒓퀬愿由ъ옄留??뱀씪 異쒓렐 ?댁뿭???뺤씤?????덉뒿?덈떎.' });
+  const today = kstParts().date;
+  const { data, error } = await service.from('attendance_records')
+    .select('id,employee_id,employee_name,work_date,home_store_name,checkin_store_name,checked_in_at,verification_method,sheet_sync_status,sheet_sync_attempts,sheet_sync_error,sheet_synced_at')
+    .eq('work_date', today)
+    .order('checked_in_at', { ascending: true });
+  if (error) throw error;
+  const records = data || [];
+  const summary = records.reduce((result, record) => {
+    result.total += 1;
+    if (record.sheet_sync_status === 'synced') result.synced += 1;
+    else if (record.sheet_sync_status === 'failed' || record.sheet_sync_status === 'not_configured') result.failed += 1;
+    else result.pending += 1;
+    return result;
+  }, { total: 0, synced: 0, pending: 0, failed: 0 });
+  return json(200, { today, records, summary });
+}
+
 async function checkIn(req: Request, actor: Employee, payload: Record<string, unknown>) {
-  if (!await canUseFeature(actor, 'attendance')) return json(403, { error: '근무 기능 사용 권한이 없습니다.' });
+  if (!await canUseFeature(actor, 'attendance')) return json(403, { error: '洹쇰Т 湲곕뒫 ?ъ슜 沅뚰븳???놁뒿?덈떎.' });
   const today = kstParts().date;
   const { data: existing } = await service.from('attendance_records').select('*').eq('employee_id', actor.id).eq('work_date', today).maybeSingle();
-  if (existing) return json(409, { error: '오늘 출근 처리가 이미 완료되었습니다.', record: existing });
+  if (existing) return json(409, { error: '?ㅻ뒛 異쒓렐 泥섎━媛 ?대? ?꾨즺?섏뿀?듬땲??', record: existing });
   const schedule = await resolveSchedule(actor, today);
-  if (schedule.dayOff) return json(409, { error: `오늘 근무표가 '${schedule.value}'로 등록되어 있어 출근 처리할 수 없습니다.` });
-  if (schedule.value && /^\d{1,2}:\d{2}/.test(schedule.value)) return json(409, { error: '근무표에 이미 출근 시간이 기록되어 있습니다. 관리자에게 확인해주세요.' });
+  if (schedule.dayOff) return json(409, { error: `?ㅻ뒛 洹쇰Т?쒓? '${schedule.value}'濡??깅줉?섏뼱 ?덉뼱 異쒓렐 泥섎━?????놁뒿?덈떎.` });
+  if (schedule.value && /^\d{1,2}:\d{2}/.test(schedule.value)) return json(409, { error: '洹쇰Т?쒖뿉 ?대? 異쒓렐 ?쒓컙??湲곕줉?섏뼱 ?덉뒿?덈떎. 愿由ъ옄?먭쾶 ?뺤씤?댁＜?몄슂.' });
   const allowed = await effectiveCheckinStores(actor, today);
   const verification = await checkVerification(req, allowed.stores, payload);
   const nowIso = new Date().toISOString();
@@ -300,7 +320,7 @@ async function checkIn(req: Request, actor: Employee, payload: Record<string, un
     sheet_sync_status: 'pending', sheet_name: schedule.sheetName, sheet_cell: schedule.cell
   }).select('*').single();
   if (error) {
-    if (error.code === '23505') return json(409, { error: '오늘 출근 처리가 이미 완료되었습니다.' });
+    if (error.code === '23505') return json(409, { error: '?ㅻ뒛 異쒓렐 泥섎━媛 ?대? ?꾨즺?섏뿀?듬땲??' });
     throw error;
   }
   if (request) await service.from('attendance_other_store_requests').update({ status: 'used', used_at: nowIso, updated_at: nowIso }).eq('id', request.id).eq('status', 'approved');
@@ -308,26 +328,26 @@ async function checkIn(req: Request, actor: Employee, payload: Record<string, un
     await writeCheckinToSheet(schedule.token, schedule.sheetName, schedule.cell, nowIso);
     await service.from('attendance_records').update({ sheet_sync_status: 'synced', sheet_sync_attempts: 1, sheet_synced_at: new Date().toISOString(), sheet_sync_error: null }).eq('id', record.id);
   } catch (sheetError) {
-    await service.from('attendance_records').update({ sheet_sync_status: 'failed', sheet_sync_attempts: 1, sheet_sync_error: sheetError instanceof Error ? sheetError.message : '근무표 반영 실패' }).eq('id', record.id);
+    await service.from('attendance_records').update({ sheet_sync_status: 'failed', sheet_sync_attempts: 1, sheet_sync_error: sheetError instanceof Error ? sheetError.message : '洹쇰Т??諛섏쁺 ?ㅽ뙣' }).eq('id', record.id);
   }
-  await service.from('audit_logs').insert({ action: '출근처리', target_type: 'attendance_record', target_id: record.id, actor_name: actor.name, detail: `${today} / ${verification.store.name} / ${verification.method}` });
+  await service.from('audit_logs').insert({ action: '異쒓렐泥섎━', target_type: 'attendance_record', target_id: record.id, actor_name: actor.name, detail: `${today} / ${verification.store.name} / ${verification.method}` });
   return json(200, { completed: true, record });
 }
 
 async function retrySheetSync(actor: Employee, payload: Record<string, unknown>) {
   const recordId = String(payload.record_id || '');
   const { data: record } = await service.from('attendance_records').select('*').eq('id', recordId).maybeSingle();
-  if (!record) return json(404, { error: '다시 반영할 출근 기록을 찾지 못했습니다.' });
-  const allowed = record.employee_id === actor.id || isSuperAdmin(actor);
-  if (!allowed) return json(403, { error: '본인의 출근 기록만 다시 반영할 수 있습니다.' });
+  if (!record) return json(404, { error: '?ㅼ떆 諛섏쁺??異쒓렐 湲곕줉??李얠? 紐삵뻽?듬땲??' });
+  const allowed = record.employee_id === actor.id || isAdminLike(actor);
+  if (!allowed) return json(403, { error: '蹂몄씤??異쒓렐 湲곕줉 ?먮뒗 愿由ъ옄 沅뚰븳?쇰줈 ?뺤씤 媛?ν븳 湲곕줉留??ㅼ떆 諛섏쁺?????덉뒿?덈떎.' });
   if (record.sheet_sync_status === 'synced') return json(200, { completed: true, record });
-  if (!record.sheet_name || !record.sheet_cell) return json(409, { error: '근무표 위치 정보가 없어 최고관리자 확인이 필요합니다.' });
+  if (!record.sheet_name || !record.sheet_cell) return json(409, { error: '洹쇰Т???꾩튂 ?뺣낫媛 ?놁뼱 理쒓퀬愿由ъ옄 ?뺤씤???꾩슂?⑸땲??' });
 
   try {
     const token = await googleAccessToken();
     const current = await readSheetRange(token, `'${record.sheet_name}'!${record.sheet_cell}`);
     const currentValue = String(current?.[0]?.[0] || '').trim();
-    if (isDayOff(currentValue)) return json(409, { error: `근무표가 '${currentValue}'로 변경되어 자동 반영할 수 없습니다.` });
+    if (isDayOff(currentValue)) return json(409, { error: `洹쇰Т?쒓? '${currentValue}'濡?蹂寃쎈릺???먮룞 諛섏쁺?????놁뒿?덈떎.` });
     if (currentValue && /^\d{1,2}:\d{2}/.test(currentValue)) {
       await service.from('attendance_records').update({
         sheet_sync_status: 'synced', sheet_sync_attempts: Number(record.sheet_sync_attempts || 0) + 1,
@@ -341,12 +361,12 @@ async function retrySheetSync(actor: Employee, payload: Record<string, unknown>)
       sheet_synced_at: new Date().toISOString(), sheet_sync_error: null
     }).eq('id', record.id);
     await service.from('audit_logs').insert({
-      action: '출근근무표재반영', target_type: 'attendance_record', target_id: record.id,
+      action: '異쒓렐洹쇰Т?쒖옱諛섏쁺', target_type: 'attendance_record', target_id: record.id,
       actor_name: actor.name, detail: `${record.work_date} / ${record.employee_name}`
     });
     return json(200, { completed: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : '근무표 반영에 실패했습니다.';
+    const message = error instanceof Error ? error.message : '洹쇰Т??諛섏쁺???ㅽ뙣?덉뒿?덈떎.';
     await service.from('attendance_records').update({
       sheet_sync_status: 'failed', sheet_sync_attempts: Number(record.sheet_sync_attempts || 0) + 1,
       sheet_sync_error: message
@@ -356,34 +376,34 @@ async function retrySheetSync(actor: Employee, payload: Record<string, unknown>)
 }
 
 async function requestOtherStore(actor: Employee, payload: Record<string, unknown>) {
-  if (!await canUseFeature(actor, 'attendance')) return json(403, { error: '근무 기능 사용 권한이 없습니다.' });
+  if (!await canUseFeature(actor, 'attendance')) return json(403, { error: '洹쇰Т 湲곕뒫 ?ъ슜 沅뚰븳???놁뒿?덈떎.' });
   const workDate = String(payload.work_date || '');
   const reason = String(payload.reason || '').trim();
   const destinationId = String(payload.destination_store_id || '');
   const kst = kstParts();
-  if (workDate < kst.date) return json(400, { error: '지난 날짜의 타 매장 출근은 요청할 수 없습니다.' });
-  if (workDate === kst.date && kst.hour >= 12) return json(400, { error: '오늘 출근할 타 매장 요청은 낮 12시 이후 승인되지 않습니다. 다음 근무일을 선택해주세요.' });
-  if (reason.length < 2) return json(400, { error: '타 매장 출근 사유를 입력해주세요.' });
+  if (workDate < kst.date) return json(400, { error: '吏???좎쭨??? 留ㅼ옣 異쒓렐? ?붿껌?????놁뒿?덈떎.' });
+  if (workDate === kst.date && kst.hour >= 12) return json(400, { error: '?ㅻ뒛 異쒓렐??? 留ㅼ옣 ?붿껌? ??12???댄썑 ?뱀씤?섏? ?딆뒿?덈떎. ?ㅼ쓬 洹쇰Т?쇱쓣 ?좏깮?댁＜?몄슂.' });
+  if (reason.length < 2) return json(400, { error: '? 留ㅼ옣 異쒓렐 ?ъ쑀瑜??낅젰?댁＜?몄슂.' });
   const [home, destination] = await Promise.all([storeByName(actor.store_name), service.from('stores').select('id,name,status').eq('id', destinationId).maybeSingle()]);
-  if (!home || !destination.data || destination.data.status === '폐점') return json(400, { error: '매장 정보를 확인해주세요.' });
-  if (home.id === destination.data.id) return json(400, { error: '현재 소속 매장이 아닌 타 매장을 선택해주세요.' });
+  if (!home || !destination.data || destination.data.status === '?먯젏') return json(400, { error: '留ㅼ옣 ?뺣낫瑜??뺤씤?댁＜?몄슂.' });
+  if (home.id === destination.data.id) return json(400, { error: '?꾩옱 ?뚯냽 留ㅼ옣???꾨땶 ? 留ㅼ옣???좏깮?댁＜?몄슂.' });
   const { data, error } = await service.from('attendance_other_store_requests').insert({
     employee_id: actor.id, employee_name: actor.name, work_date: workDate,
     home_store_id: home.id, home_store_name: home.name,
     destination_store_id: destination.data.id, destination_store_name: destination.data.name,
     reason
   }).select('*').single();
-  if (error?.code === '23505') return json(409, { error: '해당 날짜에 이미 진행 중인 타 매장 출근 요청이 있습니다.' });
+  if (error?.code === '23505') return json(409, { error: '?대떦 ?좎쭨???대? 吏꾪뻾 以묒씤 ? 留ㅼ옣 異쒓렐 ?붿껌???덉뒿?덈떎.' });
   if (error) throw error;
-  await service.from('audit_logs').insert({ action: '타매장출근요청', target_type: 'attendance_other_store_request', target_id: data.id, actor_name: actor.name, detail: `${workDate} / ${home.name} → ${destination.data.name}` });
+  await service.from('audit_logs').insert({ action: '?留ㅼ옣異쒓렐?붿껌', target_type: 'attendance_other_store_request', target_id: data.id, actor_name: actor.name, detail: `${workDate} / ${home.name} ??${destination.data.name}` });
   return json(200, { completed: true, request: data });
 }
 
 async function cancelRequest(actor: Employee, payload: Record<string, unknown>) {
   const id = String(payload.request_id || '');
   const { data: request } = await service.from('attendance_other_store_requests').select('*').eq('id', id).maybeSingle();
-  if (!request || request.employee_id !== actor.id || !['pending', 'approved'].includes(request.status)) return json(403, { error: '취소할 수 있는 요청이 아닙니다.' });
-  if (request.work_date < kstParts().date) return json(409, { error: '지난 요청은 취소할 수 없습니다.' });
+  if (!request || request.employee_id !== actor.id || !['pending', 'approved'].includes(request.status)) return json(403, { error: '痍⑥냼?????덈뒗 ?붿껌???꾨떃?덈떎.' });
+  if (request.work_date < kstParts().date) return json(409, { error: '吏???붿껌? 痍⑥냼?????놁뒿?덈떎.' });
   await service.from('attendance_other_store_requests').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', id);
   return json(200, { completed: true });
 }
@@ -391,26 +411,26 @@ async function cancelRequest(actor: Employee, payload: Record<string, unknown>) 
 async function decideRequest(actor: Employee, payload: Record<string, unknown>) {
   const id = String(payload.request_id || '');
   const decision = String(payload.decision || '');
-  if (!['approved', 'rejected'].includes(decision)) return json(400, { error: '승인 또는 반려를 선택해주세요.' });
+  if (!['approved', 'rejected'].includes(decision)) return json(400, { error: '?뱀씤 ?먮뒗 諛섎젮瑜??좏깮?댁＜?몄슂.' });
   const { data: request } = await service.from('attendance_other_store_requests').select('*').eq('id', id).eq('status', 'pending').maybeSingle();
-  if (!request) return json(404, { error: '처리할 요청을 찾지 못했습니다.' });
+  if (!request) return json(404, { error: '泥섎━???붿껌??李얠? 紐삵뻽?듬땲??' });
   const ownManagerRequest = request.employee_id === actor.id && isManager(actor);
   const allowed = isSuperAdmin(actor) || (isManager(actor) && !ownManagerRequest && request.home_store_name === actor.store_name);
-  if (!allowed) return json(403, { error: ownManagerRequest ? '점장 본인의 요청은 최고관리자만 승인할 수 있습니다.' : '현재 소속 매장 요청만 처리할 수 있습니다.' });
+  if (!allowed) return json(403, { error: ownManagerRequest ? '?먯옣 蹂몄씤???붿껌? 理쒓퀬愿由ъ옄留??뱀씤?????덉뒿?덈떎.' : '?꾩옱 ?뚯냽 留ㅼ옣 ?붿껌留?泥섎━?????덉뒿?덈떎.' });
   const nowIso = new Date().toISOString();
   await service.from('attendance_other_store_requests').update({
     status: decision, decided_by: actor.id, decided_by_name: actor.name,
     decided_at: nowIso, decision_note: String(payload.note || '').trim(), updated_at: nowIso
   }).eq('id', id).eq('status', 'pending');
-  await service.from('audit_logs').insert({ action: decision === 'approved' ? '타매장출근승인' : '타매장출근반려', target_type: 'attendance_other_store_request', target_id: id, actor_name: actor.name, detail: `${request.employee_name} / ${request.work_date} / ${request.destination_store_name}` });
+  await service.from('audit_logs').insert({ action: decision === 'approved' ? '?留ㅼ옣異쒓렐?뱀씤' : '?留ㅼ옣異쒓렐諛섎젮', target_type: 'attendance_other_store_request', target_id: id, actor_name: actor.name, detail: `${request.employee_name} / ${request.work_date} / ${request.destination_store_name}` });
   return json(200, { completed: true });
 }
 
 async function adminData(req: Request, actor: Employee) {
-  if (!isSuperAdmin(actor)) return json(403, { error: '최고관리자만 사용할 수 있습니다.' });
+  if (!isSuperAdmin(actor)) return json(403, { error: '理쒓퀬愿由ъ옄留??ъ슜?????덉뒿?덈떎.' });
   const [{ data: employees }, { data: stores }, { data: overrides }, { data: settings }, { data: ips }, { data: pending }] = await Promise.all([
-    service.from('employees').select('id,name,store_name,status,role').eq('status', '재직').order('store_name').order('name'),
-    service.from('stores').select('id,name,status').neq('status', '폐점').order('name'),
+    service.from('employees').select('id,name,store_name,status,role').eq('status', '?ъ쭅').order('store_name').order('name'),
+    service.from('stores').select('id,name,status').neq('status', '?먯젏').order('name'),
     service.from('feature_access_overrides').select('*'),
     service.from('store_attendance_settings').select('*'),
     service.from('store_attendance_ips').select('*').order('created_at'),
@@ -420,12 +440,12 @@ async function adminData(req: Request, actor: Employee) {
 }
 
 async function saveFeatureOverride(actor: Employee, payload: Record<string, unknown>) {
-  if (!isSuperAdmin(actor)) return json(403, { error: '최고관리자만 사용할 수 있습니다.' });
+  if (!isSuperAdmin(actor)) return json(403, { error: '理쒓퀬愿由ъ옄留??ъ슜?????덉뒿?덈떎.' });
   const scopeType = String(payload.scope_type || '');
   const featureKey = String(payload.feature_key || '');
   const targetId = String(payload.target_id || '');
   const mode = String(payload.mode || 'inherit');
-  if (!['employee', 'store'].includes(scopeType) || !['happycall', 'freepass', 'accessories', 'attendance'].includes(featureKey)) return json(400, { error: '권한 설정값을 확인해주세요.' });
+  if (!['employee', 'store'].includes(scopeType) || !['happycall', 'freepass', 'accessories', 'attendance'].includes(featureKey)) return json(400, { error: '沅뚰븳 ?ㅼ젙媛믪쓣 ?뺤씤?댁＜?몄슂.' });
   const query = service.from('feature_access_overrides').delete().eq('scope_type', scopeType).eq('feature_key', featureKey).eq(scopeType === 'employee' ? 'employee_id' : 'store_id', targetId);
   const { error: deleteError } = await query;
   if (deleteError) throw deleteError;
@@ -435,14 +455,14 @@ async function saveFeatureOverride(actor: Employee, payload: Record<string, unkn
     const { error } = await service.from('feature_access_overrides').insert(row);
     if (error) throw error;
   }
-  await service.from('audit_logs').insert({ action: '기능사용권한변경', target_type: scopeType, target_id: targetId, actor_name: actor.name, detail: `${featureKey} / ${mode}` });
+  await service.from('audit_logs').insert({ action: '湲곕뒫?ъ슜沅뚰븳蹂寃?, target_type: scopeType, target_id: targetId, actor_name: actor.name, detail: `${featureKey} / ${mode}` });
   return json(200, { completed: true });
 }
 
 async function saveFeatureOverrides(actor: Employee, payload: Record<string, unknown>) {
-  if (!isSuperAdmin(actor)) return json(403, { error: '최고관리자만 사용할 수 있습니다.' });
+  if (!isSuperAdmin(actor)) return json(403, { error: '理쒓퀬愿由ъ옄留??ъ슜?????덉뒿?덈떎.' });
   const changes = Array.isArray(payload.changes) ? payload.changes : [];
-  if (!changes.length || changes.length > 200) return json(400, { error: '저장할 권한 변경사항을 확인해주세요.' });
+  if (!changes.length || changes.length > 200) return json(400, { error: '??ν븷 沅뚰븳 蹂寃쎌궗??쓣 ?뺤씤?댁＜?몄슂.' });
   const featureKeys = ['happycall', 'freepass', 'accessories', 'attendance'];
   const modes = ['inherit', 'enabled', 'disabled'];
   for (const change of changes) {
@@ -450,14 +470,14 @@ async function saveFeatureOverrides(actor: Employee, payload: Record<string, unk
     const featureKey = String(change?.feature_key || '');
     const mode = String(change?.mode || '');
     if (!targetId || !featureKeys.includes(featureKey) || !modes.includes(mode)) {
-      return json(400, { error: '권한 설정값을 확인해주세요.' });
+      return json(400, { error: '沅뚰븳 ?ㅼ젙媛믪쓣 ?뺤씤?댁＜?몄슂.' });
     }
   }
   const targetIds = [...new Set(changes.map(change => String(change.target_id)))];
   const { data: employees, error: employeeError } = await service.from('employees')
-    .select('id').in('id', targetIds).eq('status', '재직');
+    .select('id').in('id', targetIds).eq('status', '?ъ쭅');
   if (employeeError) throw employeeError;
-  if ((employees || []).length !== targetIds.length) return json(400, { error: '재직 중인 직원만 설정할 수 있습니다.' });
+  if ((employees || []).length !== targetIds.length) return json(400, { error: '?ъ쭅 以묒씤 吏곸썝留??ㅼ젙?????덉뒿?덈떎.' });
 
   for (const change of changes) {
     const targetId = String(change.target_id);
@@ -475,14 +495,14 @@ async function saveFeatureOverrides(actor: Employee, payload: Record<string, unk
     }
   }
   await service.from('audit_logs').insert({
-    action: '기능사용권한일괄변경', target_type: 'employee', target_id: actor.id,
-    actor_name: actor.name, detail: `${targetIds.length}명 / ${changes.length}개 설정`
+    action: '湲곕뒫?ъ슜沅뚰븳?쇨큵蹂寃?, target_type: 'employee', target_id: actor.id,
+    actor_name: actor.name, detail: `${targetIds.length}紐?/ ${changes.length}媛??ㅼ젙`
   });
   return json(200, { completed: true, changed: changes.length });
 }
 
 async function saveStoreSetting(actor: Employee, payload: Record<string, unknown>) {
-  if (!isSuperAdmin(actor)) return json(403, { error: '최고관리자만 사용할 수 있습니다.' });
+  if (!isSuperAdmin(actor)) return json(403, { error: '理쒓퀬愿由ъ옄留??ъ슜?????덉뒿?덈떎.' });
   const storeId = String(payload.store_id || '');
     const row = {
       store_id: storeId, enabled: Boolean(payload.enabled), auth_mode: String(payload.auth_mode || 'either'),
@@ -500,20 +520,21 @@ async function saveStoreSetting(actor: Employee, payload: Record<string, unknown
     const { error: ipError } = await service.from('store_attendance_ips').insert(ips.map(ip => ({ store_id: storeId, ip_address: ip, created_by: actor.id })));
     if (ipError) throw ipError;
   }
-  await service.from('audit_logs').insert({ action: '매장출근인증설정', target_type: 'store', target_id: storeId, actor_name: actor.name, detail: `${row.auth_mode} / 반경 ${row.radius_meters}m / IP ${ips.length}개` });
+  await service.from('audit_logs').insert({ action: '留ㅼ옣異쒓렐?몄쬆?ㅼ젙', target_type: 'store', target_id: storeId, actor_name: actor.name, detail: `${row.auth_mode} / 諛섍꼍 ${row.radius_meters}m / IP ${ips.length}媛? });
   return json(200, { completed: true });
 }
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: HEADERS });
-  if (req.method !== 'POST') return json(405, { error: '지원하지 않는 요청입니다.' });
+  if (req.method !== 'POST') return json(405, { error: '吏?먰븯吏 ?딅뒗 ?붿껌?낅땲??' });
   const actor = await actorFromRequest(req);
-  if (!actor) return json(401, { error: '로그인이 만료되었거나 퇴사 처리된 계정입니다.' });
+  if (!actor) return json(401, { error: '濡쒓렇?몄씠 留뚮즺?섏뿀嫄곕굹 ?댁궗 泥섎━??怨꾩젙?낅땲??' });
   try {
     const payload = await req.json().catch(() => ({}));
     const action = String(payload.action || '');
     if (action === 'current-status') return json(200, await currentStatus(actor));
     if (action === 'manager-pending') return await managerPending(actor);
+    if (action === 'today-attendance') return await todayAttendance(actor);
     if (action === 'check-in') return await checkIn(req, actor, payload);
     if (action === 'retry-sheet-sync') return await retrySheetSync(actor, payload);
     if (action === 'request-other-store') return await requestOtherStore(actor, payload);
@@ -523,9 +544,10 @@ Deno.serve(async (req) => {
       if (action === 'save-feature-override') return await saveFeatureOverride(actor, payload);
       if (action === 'save-feature-overrides') return await saveFeatureOverrides(actor, payload);
       if (action === 'save-store-setting') return await saveStoreSetting(actor, payload);
-    return json(400, { error: '요청 내용을 확인해주세요.' });
+    return json(400, { error: '?붿껌 ?댁슜???뺤씤?댁＜?몄슂.' });
   } catch (error) {
     console.error('attendance-api failed', error);
-    return json(500, { error: error instanceof Error ? error.message : '근무 기능 처리 중 오류가 발생했습니다.' });
+    return json(500, { error: error instanceof Error ? error.message : '洹쇰Т 湲곕뒫 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.' });
   }
 });
+
