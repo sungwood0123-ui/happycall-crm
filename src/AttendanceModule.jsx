@@ -28,6 +28,20 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function formatTime(value) {
+  if (!value) return '-';
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).format(new Date(value));
+}
+
+function sheetSyncLabel(status) {
+  if (status === 'synced') return '반영 완료';
+  if (status === 'failed') return '반영 실패';
+  if (status === 'not_configured') return '연결 확인 필요';
+  return '반영 중';
+}
+
 function getLocation() {
   return new Promise(resolve => {
     if (!navigator.geolocation) return resolve({});
@@ -168,23 +182,38 @@ export default function AttendanceModule({ supabase, user, superAdmin = false })
   const [view, setView] = useState('attendance');
   const [status, setStatus] = useState(null);
   const [pending, setPending] = useState([]);
+  const [todayAttendance, setTodayAttendance] = useState({ records: [], summary: { total: 0, synced: 0, pending: 0, failed: 0 } });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [requestForm, setRequestForm] = useState({ work_date: '', destination_store_id: '', reason: '' });
 
   const canApprove = user.role === '점장' || superAdmin;
+  const canViewTodayAttendance = user.role === '관리자' || superAdmin;
+  const tabs = [
+    { key: 'attendance', label: '출근 현황', show: true },
+    { key: 'records', label: '출근 내역', show: canViewTodayAttendance },
+    { key: 'approvals', label: '타 매장 출근 승인', show: canApprove },
+    { key: 'settings', label: '매장 출근 설정', show: superAdmin }
+  ].filter(tab => tab.show);
 
   async function load() {
     setLoading(true);
     setMessage('');
     try {
-      const current = await invokeAttendance(supabase, { action: 'current-status' });
+      const [currentResult, approvalResult, attendanceResult] = await Promise.allSettled([
+        invokeAttendance(supabase, { action: 'current-status' }),
+        canApprove ? invokeAttendance(supabase, { action: 'manager-pending' }) : Promise.resolve({ requests: [] }),
+        canViewTodayAttendance ? invokeAttendance(supabase, { action: 'today-attendance' }) : Promise.resolve(null)
+      ]);
+      if (currentResult.status === 'rejected') throw currentResult.reason;
+      const current = currentResult.value;
       setStatus(current);
       setRequestForm(previous => ({ ...previous, work_date: previous.work_date || current.today }));
-      if (canApprove) {
-        const approval = await invokeAttendance(supabase, { action: 'manager-pending' });
-        setPending(approval.requests || []);
+      if (approvalResult.status === 'fulfilled') setPending(approvalResult.value.requests || []);
+      if (attendanceResult.status === 'fulfilled' && attendanceResult.value) setTodayAttendance(attendanceResult.value);
+      if (approvalResult.status === 'rejected' || attendanceResult.status === 'rejected') {
+        setMessage('일부 관리 자료를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
       }
     } catch (error) {
       setMessage(error.message);
@@ -200,10 +229,17 @@ export default function AttendanceModule({ supabase, user, superAdmin = false })
     setBusy(true);
     setMessage('');
     try {
-      const location = await getLocation();
-      await invokeAttendance(supabase, { action: 'check-in', ...location });
-      setMessage('출근 처리가 완료되었습니다.');
+      try {
+        await invokeAttendance(supabase, { action: 'check-in' });
+      } catch (wifiError) {
+        if (!String(wifiError.message || '').includes('WiFi 또는 위치')) throw wifiError;
+        const location = await getLocation();
+        if (location.latitude == null) throw new Error('매장 WiFi가 확인되지 않았고 현재 위치도 확인할 수 없습니다. 휴대폰의 위치 권한을 허용한 뒤 다시 시도해주세요.');
+        await invokeAttendance(supabase, { action: 'check-in', ...location });
+      }
       await load();
+      setMessage('출근 처리가 완료되었습니다.');
+      alert('출근 처리가 완료되었습니다.');
     } catch (error) {
       setMessage(error.message);
     } finally { setBusy(false); }
@@ -256,9 +292,8 @@ export default function AttendanceModule({ supabase, user, superAdmin = false })
         <button type="button" className="attendanceRefresh" onClick={load}>새로고침</button>
       </div>
 
-      {superAdmin && <div className="attendanceTopTabs">
-        <button className={view === 'attendance' ? 'active' : ''} onClick={() => setView('attendance')}>출근 현황</button>
-        <button className={view === 'settings' ? 'active' : ''} onClick={() => setView('settings')}>매장 출근 설정</button>
+      {tabs.length > 1 && <div className="attendanceTopTabs" aria-label="출근 현황 및 매장 출근 설정 메뉴" style={{ '--attendance-tab-count': tabs.length }}>
+        {tabs.map(tab => <button key={tab.key} className={view === tab.key ? 'active' : ''} onClick={() => setView(tab.key)}>{tab.label}</button>)}
       </div>}
 
       {message && <div className="attendanceMessage" role="status">{message}</div>}
@@ -266,8 +301,7 @@ export default function AttendanceModule({ supabase, user, superAdmin = false })
       {view === 'attendance' && <>
         <div className="attendanceSummaryGrid">
           <article><span>오늘 날짜</span><strong>{status?.today || '-'}</strong></article>
-          <article><span>근무표</span><strong>{status?.schedule?.value || (status?.scheduleError ? '확인 필요' : '근무')}</strong></article>
-          <article><span>출근 상태</span><strong>{status?.record ? '출근 완료' : '미출근'}</strong></article>
+          <article><span>출근 상태</span><strong>{status?.record ? `출근 완료 ${formatTime(status.record.checked_in_at)}` : status?.schedule?.dayOff ? '휴무' : '출근 전'}</strong></article>
         </div>
 
         <div className="attendancePanel attendanceCheckinPanel">
@@ -308,14 +342,37 @@ export default function AttendanceModule({ supabase, user, superAdmin = false })
           </div>
         </div>
 
-        {canApprove && <div className="attendancePanel">
+      </>}
+
+      {view === 'records' && canViewTodayAttendance && <div className="attendancePanel attendanceTodayPanel">
+        <div className="attendancePanelHeading">
+          <div><h3>당일 출근 내역</h3><p className="attendanceHelp">{status?.today} 출근 기록과 구글 근무표 반영 여부입니다.</p></div>
+        </div>
+        <div className="attendanceTodaySummary">
+          <article><span>오늘 출근</span><strong>{todayAttendance.summary.total}명</strong></article>
+          <article><span>반영 완료</span><strong>{todayAttendance.summary.synced}명</strong></article>
+          <article><span>반영 중</span><strong>{todayAttendance.summary.pending}명</strong></article>
+          <article className={todayAttendance.summary.failed ? 'warning' : ''}><span>반영 실패</span><strong>{todayAttendance.summary.failed}명</strong></article>
+        </div>
+        <div className="attendanceDesktopTable"><table><thead><tr><th>직원</th><th>소속 매장</th><th>출근 매장</th><th>출근 시각</th><th>확인 방식</th><th>구글 근무표</th></tr></thead><tbody>
+          {todayAttendance.records.map(record => <tr key={record.id}><td>{record.employee_name}</td><td>{record.home_store_name}</td><td>{record.checkin_store_name}</td><td>{formatTime(record.checked_in_at)}</td><td>{record.verification_method === 'wifi' ? 'WiFi' : 'GPS'}</td><td><span className={`attendanceSyncBadge ${record.sheet_sync_status}`}>{sheetSyncLabel(record.sheet_sync_status)}</span>{record.sheet_sync_status !== 'synced' && <button type="button" className="attendanceRetry" disabled={busy} onClick={() => retrySheetSync(record.id)}>다시 반영</button>}</td></tr>)}
+        </tbody></table></div>
+        <div className="attendanceMobileList attendanceTodayMobile">
+          {todayAttendance.records.map(record => <article key={record.id}>
+            <div><strong>{record.employee_name}</strong><span>{record.home_store_name} · {formatTime(record.checked_in_at)}</span><span>출근 매장 {record.checkin_store_name} · {record.verification_method === 'wifi' ? 'WiFi' : 'GPS'}</span></div>
+            <div className="attendanceCardRight"><span className={`attendanceSyncBadge ${record.sheet_sync_status}`}>{sheetSyncLabel(record.sheet_sync_status)}</span>{record.sheet_sync_status !== 'synced' && <button type="button" className="attendanceRetry" disabled={busy} onClick={() => retrySheetSync(record.id)}>다시 반영</button>}</div>
+          </article>)}
+        </div>
+        {!todayAttendance.records.length && <EmptyState>오늘 출근한 직원이 없습니다.</EmptyState>}
+      </div>}
+
+      {view === 'approvals' && canApprove && <div className="attendancePanel">
           <h3>타 매장 출근 승인</h3>
           <div className="attendanceCards approval">{pending.length ? pending.map(request => <article key={request.id}>
             <div><strong>{request.employee_name} · {request.work_date}</strong><span>{request.home_store_name} → {request.destination_store_name}</span><span>{request.reason}</span></div>
             <div className="attendanceApprovalButtons"><button disabled={busy} onClick={() => requestAction('decide-request', request.id, 'rejected')}>반려</button><button className="attendancePrimary" disabled={busy} onClick={() => requestAction('decide-request', request.id, 'approved')}>승인</button></div>
           </article>) : <EmptyState>승인 대기 중인 요청이 없습니다.</EmptyState>}</div>
         </div>}
-      </>}
 
       {view === 'settings' && superAdmin && <StoreAttendanceSettings supabase={supabase} />}
     </section>

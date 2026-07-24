@@ -10828,7 +10828,7 @@ td > .inlineLoadingState,
 .attendanceTitleRow h2 { margin: 2px 0 0; font-size: 30px; line-height: 1.2; }
 .attendanceEyebrow { margin: 0; color: #2563eb; font-size: 13px; font-weight: 800; }
 .attendanceRefresh { min-height: 42px; padding: 0 16px; border: 1px solid #d8dee8; border-radius: 12px; background: #fff; font-weight: 700; }
-.attendanceTopTabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 6px; margin-bottom: 18px; border: 1px solid #dfe4ec; border-radius: 16px; background: #f7f9fc; }
+.attendanceTopTabs { display: grid; grid-template-columns: repeat(var(--attendance-tab-count, 3), minmax(0, 1fr)); gap: 8px; padding: 6px; margin-bottom: 18px; border: 1px solid #dfe4ec; border-radius: 16px; background: #f7f9fc; }
 .attendanceTopTabs button,
 .accessScopeTabs button { min-width: 0; min-height: 46px; border: 0; border-radius: 12px; background: transparent; color: #667085; font-weight: 800; white-space: nowrap; }
 .attendanceTopTabs button.active,
@@ -10895,6 +10895,18 @@ td > .inlineLoadingState,
 .attendanceDesktopTable td { padding: 12px 10px; border-bottom: 1px solid #e8ebf0; text-align: left; white-space: nowrap; font-size: 13px; }
 .attendanceDesktopTable th { background: #f7f9fc; }
 .attendanceMobileList { display: none; }
+.attendancePanelHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.attendancePanelHeading .attendanceHelp { margin-bottom: 0; }
+.attendanceTodaySummary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
+.attendanceTodaySummary article { min-width: 0; padding: 15px; border: 1px solid #e1e6ed; border-radius: 14px; background: #f8fafc; display: flex; flex-direction: column; gap: 5px; }
+.attendanceTodaySummary article.warning { border-color: #fecaca; background: #fff7f7; }
+.attendanceTodaySummary span { color: #667085; font-size: 13px; }
+.attendanceTodaySummary strong { font-size: 20px; line-height: 1.25; }
+.attendanceSyncBadge { display: inline-flex; align-items: center; justify-content: center; min-height: 27px; margin-right: 8px; padding: 4px 9px; border-radius: 999px; background: #fff7d6; color: #8a5a00; font-size: 12px; font-weight: 800; white-space: nowrap; }
+.attendanceSyncBadge.synced { background: #dcfce7; color: #166534; }
+.attendanceSyncBadge.failed,
+.attendanceSyncBadge.not_configured { background: #fee2e2; color: #991b1b; }
+.attendanceTodayMobile .attendanceCardRight { gap: 8px; }
 .accessScopeTabs { width: min(440px, 100%); display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 5px; margin-bottom: 16px; border: 1px solid #dfe4ec; border-radius: 14px; background: #f7f9fc; }
 .accessTarget { margin-bottom: 16px; }
 .featureAccessGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -10933,7 +10945,8 @@ td > .inlineLoadingState,
 @media (max-width: 768px) {
   .attendancePage { padding: 18px 14px 40px; }
   .attendanceTitleRow h2 { font-size: 26px; }
-  .attendanceTopTabs { grid-template-columns: 1fr; }
+  .attendanceTopTabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .attendanceTopTabs button:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .attendanceSummaryGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .attendanceSummaryGrid article { min-height: 92px; padding: 16px; }
   .attendanceSummaryGrid article:last-child:nth-child(odd) { grid-column: 1 / -1; }
@@ -10953,6 +10966,10 @@ td > .inlineLoadingState,
   .attendanceCards.approval article { flex-direction: column; }
   .attendanceApprovalButtons { width: 100%; }
   .attendanceApprovalButtons button { flex: 1; }
+  .attendanceTodaySummary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .attendanceTodaySummary article { padding: 13px; }
+  .attendanceTodayMobile article { align-items: center; }
+  .attendanceTodayMobile .attendanceCardRight { flex: 0 0 auto; align-items: flex-end; }
   .featureAccessGrid { grid-template-columns: 1fr; }
   .featureAccessToolbar { grid-template-columns: 1fr 1fr; }
   .featureAccessToolbar input { grid-column: 1 / -1; }

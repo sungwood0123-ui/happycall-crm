@@ -78,6 +78,7 @@ async function actorFromRequest(req: Request): Promise<Employee | null> {
 
 function isSuperAdmin(actor: Employee) { return actor.role === '최고관리자'; }
 function isManager(actor: Employee) { return actor.role === '점장'; }
+function isAdminLike(actor: Employee) { return actor.role === '관리자' || isSuperAdmin(actor); }
 
 async function storeByName(name: string): Promise<Store | null> {
   const { data } = await service.from('stores').select('id,name,status').eq('name', name).maybeSingle();
@@ -278,6 +279,25 @@ async function managerPending(actor: Employee) {
   return json(200, { requests: data || [] });
 }
 
+async function todayAttendance(actor: Employee) {
+  if (!isAdminLike(actor)) return json(403, { error: '관리자 또는 최고관리자만 당일 출근 내역을 확인할 수 있습니다.' });
+  const today = kstParts().date;
+  const { data, error } = await service.from('attendance_records')
+    .select('id,employee_id,employee_name,work_date,home_store_name,checkin_store_name,checked_in_at,verification_method,sheet_sync_status,sheet_sync_attempts,sheet_sync_error,sheet_synced_at')
+    .eq('work_date', today)
+    .order('checked_in_at', { ascending: true });
+  if (error) throw error;
+  const records = data || [];
+  const summary = records.reduce((result, record) => {
+    result.total += 1;
+    if (record.sheet_sync_status === 'synced') result.synced += 1;
+    else if (record.sheet_sync_status === 'failed' || record.sheet_sync_status === 'not_configured') result.failed += 1;
+    else result.pending += 1;
+    return result;
+  }, { total: 0, synced: 0, pending: 0, failed: 0 });
+  return json(200, { today, records, summary });
+}
+
 async function checkIn(req: Request, actor: Employee, payload: Record<string, unknown>) {
   if (!await canUseFeature(actor, 'attendance')) return json(403, { error: '근무 기능 사용 권한이 없습니다.' });
   const today = kstParts().date;
@@ -318,8 +338,8 @@ async function retrySheetSync(actor: Employee, payload: Record<string, unknown>)
   const recordId = String(payload.record_id || '');
   const { data: record } = await service.from('attendance_records').select('*').eq('id', recordId).maybeSingle();
   if (!record) return json(404, { error: '다시 반영할 출근 기록을 찾지 못했습니다.' });
-  const allowed = record.employee_id === actor.id || isSuperAdmin(actor);
-  if (!allowed) return json(403, { error: '본인의 출근 기록만 다시 반영할 수 있습니다.' });
+  const allowed = record.employee_id === actor.id || isAdminLike(actor);
+  if (!allowed) return json(403, { error: '본인의 출근 기록 또는 관리자 권한으로 확인 가능한 기록만 다시 반영할 수 있습니다.' });
   if (record.sheet_sync_status === 'synced') return json(200, { completed: true, record });
   if (!record.sheet_name || !record.sheet_cell) return json(409, { error: '근무표 위치 정보가 없어 최고관리자 확인이 필요합니다.' });
 
@@ -514,6 +534,7 @@ Deno.serve(async (req) => {
     const action = String(payload.action || '');
     if (action === 'current-status') return json(200, await currentStatus(actor));
     if (action === 'manager-pending') return await managerPending(actor);
+    if (action === 'today-attendance') return await todayAttendance(actor);
     if (action === 'check-in') return await checkIn(req, actor, payload);
     if (action === 'retry-sheet-sync') return await retrySheetSync(actor, payload);
     if (action === 'request-other-store') return await requestOtherStore(actor, payload);

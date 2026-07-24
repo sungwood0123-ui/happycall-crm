@@ -26,6 +26,6 @@ test('근무 조회는 로딩 후 데이터 또는 빈 상태를 표시한다', 
 
 test('근무표 반영 실패는 PC와 모바일 모두 다시 시도할 수 있다', () => {
   const buttons = source.match(/retrySheetSync\(record\.id\)/g) || [];
-  assert.equal(buttons.length, 2);
+  assert.equal(buttons.length, 4);
   assert.match(styles, /\.attendanceRetry[\s\S]*white-space: nowrap/);
 });
